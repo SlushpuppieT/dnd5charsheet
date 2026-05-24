@@ -1622,6 +1622,7 @@ function getPresetItem(preset, slug) {
  */
 function docSlugToUrlPrefix(docSlug) {
   if (!docSlug || docSlug === 'wotc-srd') return 'srd';
+  if (docSlug === 'o5e') return 'open5e';  // API slug is 'o5e'; URL prefix is 'open5e'
   return docSlug; // 'srd-2024', 'a5e', 'toh', 'kp', 'blackflag', etc. map as-is
 }
 
