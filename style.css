@@ -2559,6 +2559,10 @@ input.hb-deviation {
   .ds-box          { width: 36px; height: 36px; min-width: 36px; }
   .big-check       { width: 24px; height: 24px; }
 
+  /* ── Saving throws: hide full name, keep shorthand only ── */
+  .save-row label  { display: none; }
+  .save-row        { grid-template-columns: 18px 28px 36px; }
+
   /* ── Identity grid: mobile reflow ──────────────────────────────
      6-column grid so rows can split as halves (3+3) or thirds (2+2+2).
      Explicit grid-row on every cell so DOM order (Level is 2nd child)
@@ -2644,18 +2648,54 @@ input.hb-deviation {
   .ab-total      { font-size: 0.95rem; margin: 1px 0 3px; }
   .ab-base-row input[type="number"] { width: 36px; font-size: 0.72rem; }
 
-  /* ── Compact stepper buttons in tight multi-column cards ──────────────
-     The global min-width: 44px is correct for standalone steppers, but
-     inside 3-column grids (HP, combat stats, ability scores) it causes
-     horizontal overflow. Match the rp-step approach: smaller fixed size,
-     still tall enough to tap reliably.
+  /* ── Combat/HP steppers: 2×2 grid (number top-spanning, ± buttons below)
+     Each stepper lives inside a 3-column layout (~90 px wide). Laying the
+     input across the full width on row 1 keeps the value legible; the two
+     buttons share row 2, so both stay tap-friendly without overflowing.
+     DOM order: [−btn] [input] [+btn] — explicit grid-row/column overrides
+     the source order so the input always renders on top.
      ─────────────────────────────────────────────────────────────────── */
-  .card.hp .stepper-btn,
-  .card.combat-top .stepper-btn,
-  .ability .stepper-btn {
-    min-width: 30px;
-    min-height: 36px;
-    font-size: 0.9rem;
-    padding: 0;
+  .card.combat-top .stepper-row,
+  .card.hp .hp-grid .stepper-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+  }
+  /* Input spans both columns on row 1 */
+  .card.combat-top .stepper-row .stepper-input,
+  .card.hp .hp-grid .stepper-row .stepper-input {
+    grid-row: 1;
+    grid-column: 1 / 3;
+    font-size: 1.15rem;
+  }
+  /* − button (first child in DOM) → row 2, left column */
+  .card.combat-top .stepper-row .stepper-btn:first-child,
+  .card.hp .hp-grid .stepper-row .stepper-btn:first-child {
+    grid-row: 2;
+    grid-column: 1;
+    min-width: 0;
+    min-height: 32px;
+    width: 100%;
+  }
+  /* + button (last child in DOM) → row 2, right column */
+  .card.combat-top .stepper-row .stepper-btn:last-child,
+  .card.hp .hp-grid .stepper-row .stepper-btn:last-child {
+    grid-row: 2;
+    grid-column: 2;
+    min-width: 0;
+    min-height: 32px;
+    width: 100%;
+  }
+
+  /* ── Armor enhancement ± buttons: compact like resource-pool rp-step ──
+     On mobile the global 44×44 px minimum makes these oversized next to
+     the armor dropdown. Match the rp-step footprint (≈22–24 px square).
+     ─────────────────────────────────────────────────────────────────── */
+  .armor-enhance .stepper-btn {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: 26px;
+    height: 26px;
+    font-size: 0.85rem;
   }
 }
