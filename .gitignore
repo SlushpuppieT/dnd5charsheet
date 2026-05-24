@@ -1,0 +1,18 @@
+# Saved characters — personal data, not for the repo
+Characters/
+
+# Working backups
+Backup/
+
+# Personal notes / campaign codex
+Resources/
+
+# Project planning notes
+PROJECT.md
+
+# Claude Code IDE settings
+.claude/
+
+# OS junk
+.DS_Store
+Thumbs.db

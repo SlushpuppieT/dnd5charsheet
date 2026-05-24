@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D&D 5e Character Sheet</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">&#x2694;</span>
+    <span class="brand-text">5e Character Sheet</span>
+  </div>
+  <div id="api-loading" class="api-loading hidden" role="status" aria-live="polite">
+    <span class="api-loading-spinner" aria-hidden="true"></span>
+    <span class="api-loading-text">Fetching API…</span>
+  </div>
+  <!-- Desktop toolbar (always visible); becomes hamburger menu on mobile -->
+  <div class="toolbar" id="mobile-menu">
+    <select id="theme-select" class="theme-select" title="Theme">
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+      <option value="contrast">High Contrast</option>
+      <option value="retro">Retro Darkwave</option>
+      <option value="terminal">Terminal CRT</option>
+    </select>
+    <button id="btn-new" class="btn">New</button>
+    <button id="btn-save" class="btn">Save</button>
+    <button id="btn-load" class="btn">Load</button>
+    <input type="file" id="file-load" accept=".json" hidden>
+    <button id="btn-rest" class="btn btn-rest">&#x26FA; Rest</button>
+    <button id="btn-info" class="btn" title="Help & formatting reference">&#x2139; Info</button>
+    <button id="btn-srd" class="btn btn-accent">SRD Lookup</button>
+  </div>
+  <!-- Hamburger button — mobile only -->
+  <button id="btn-hamburger" class="btn-hamburger" aria-label="Open menu" aria-expanded="false" aria-controls="mobile-menu">
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+    <span class="hamburger-bar"></span>
+  </button>
+</header>
+
+<!-- Mobile mini-header: always-visible character snapshot (hidden on desktop) -->
+<div id="mobile-mini-header" aria-live="polite" aria-label="Character summary">
+  <span id="mini-name">Unnamed Adventurer</span>
+  <span class="mini-sep" aria-hidden="true">·</span>
+  <span id="mini-class-level">—</span>
+  <span class="mini-sep" aria-hidden="true">·</span>
+  <span id="mini-hp">HP —</span>
+</div>
+
+<div id="api-failed-banner" class="api-failed-banner hidden" role="alert" aria-live="polite">
+  <span class="api-failed-icon">⚠</span>
+  <span id="api-failed-msg">SRD data could not be loaded — sheet is in <strong>manual mode</strong>.
+    Class, Race, and Background lists are unavailable; use the text fields below each dropdown to enter names manually.
+    All existing character data is intact.</span>
+  <button id="api-retry-btn" class="btn btn-sm">↺ Retry</button>
+</div>
+
+<main class="sheet">
+
+  <!-- Identity strip — always visible on all tabs (desktop: full-width above grid) -->
+  <section class="card identity">
+    <div class="identity-name">
+      <label>Character Name</label>
+      <input type="text" data-bind="name" class="big-input" placeholder="Unnamed Adventurer">
+    </div>
+    <div class="identity-grid">
+      <div class="srd-field">
+        <label>Class <span class="preset-link-wrap" id="preset-link-class"></span></label>
+        <select class="srd-preset" data-preset="class"><option value="">Loading…</option></select>
+        <input type="text" data-bind="class" placeholder="Fighter">
+      </div>
+      <div class="identity-level">
+        <label>Level</label>
+        <div class="stepper-row stepper-row-stacked">
+          <input type="number" data-bind="level" min="1" max="20" value="1"
+                 class="stepper-input no-spinner"
+                 data-step-min="1" data-step-max="20">
+          <div class="stepper-stack">
+            <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="level" data-dir="1"  title="+1">+</button>
+            <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="level" data-dir="-1" title="−1">&minus;</button>
+          </div>
+        </div>
+      </div>
+      <div class="srd-field">
+        <label>Race <span class="preset-link-wrap" id="preset-link-race"></span></label>
+        <select class="srd-preset" data-preset="race"><option value="">Loading…</option></select>
+        <input type="text" data-bind="race" placeholder="Human">
+      </div>
+      <div class="srd-field">
+        <label>Background <span class="preset-link-wrap" id="preset-link-background"></span></label>
+        <select class="srd-preset" data-preset="background"><option value="">Loading…</option></select>
+        <input type="text" data-bind="background" placeholder="Soldier">
+      </div>
+      <div class="alignment-wrap">
+        <label>Alignment</label>
+        <div class="align-picker" id="align-picker">
+          <button type="button" class="align-display" id="align-display">—</button>
+          <div class="align-dropdown hidden" id="align-dropdown">
+            <div class="alignment-grid" id="alignment-grid">
+              <span class="ag-h"></span>
+              <span class="ag-h">Good</span>
+              <span class="ag-h">Neutral</span>
+              <span class="ag-h">Evil</span>
+              <span class="ag-r">Lawful</span>
+              <button type="button" class="ag-btn" data-align="LG" title="Lawful Good">LG</button>
+              <button type="button" class="ag-btn" data-align="LN" title="Lawful Neutral">LN</button>
+              <button type="button" class="ag-btn" data-align="LE" title="Lawful Evil">LE</button>
+              <span class="ag-r">Neutral</span>
+              <button type="button" class="ag-btn" data-align="NG" title="Neutral Good">NG</button>
+              <button type="button" class="ag-btn" data-align="TN" title="True Neutral">TN</button>
+              <button type="button" class="ag-btn" data-align="NE" title="Neutral Evil">NE</button>
+              <span class="ag-r">Chaotic</span>
+              <button type="button" class="ag-btn" data-align="CG" title="Chaotic Good">CG</button>
+              <button type="button" class="ag-btn" data-align="CN" title="Chaotic Neutral">CN</button>
+              <button type="button" class="ag-btn" data-align="CE" title="Chaotic Evil">CE</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <label>Experience</label>
+        <div class="stepper-row">
+          <button type="button" class="stepper-btn" data-step-target="experience" data-dir="-25" title="−25 XP">&minus;</button>
+          <input type="number" data-bind="experience" min="0" value="0" class="stepper-input no-spinner">
+          <button type="button" class="stepper-btn" data-step-target="experience" data-dir="25"  title="+25 XP">+</button>
+        </div>
+      </div>
+      <div><label>Proficiency</label><div class="readout" id="prof-bonus">+2</div></div>
+      <div><label>Inspiration</label><input type="checkbox" data-bind="inspiration" class="big-check"></div>
+    </div>
+  </section>
+
+  <div class="tab-panels">
+
+    <!-- ╔═══════════════════════════════════════════════════════╗
+         ║ COLUMN 1 (left) — Stats · Skills · Equipment         ║
+         ╚═══════════════════════════════════════════════════════╝ -->
+    <div class="col-group" data-col="1">
+
+    <!-- ═══════════════════════════════════════════════════════
+         TAB: STATS — Ability Scores · Saves · Passive Senses
+         ═══════════════════════════════════════════════════════ -->
+    <div class="tab-panel active" data-tab="stats" role="tabpanel" aria-labelledby="tab-btn-stats">
+
+      <section class="card abilities">
+        <h2>Ability Scores</h2>
+        <div class="ability-grid">
+          <!-- Filled by JS -->
+        </div>
+      </section>
+
+      <section class="card" id="saving-throws-card">
+        <h2>Saving Throws</h2>
+        <div class="save-list" id="save-list"></div>
+      </section>
+
+      <section class="card passive" id="passive-senses-card">
+        <h2>Passive Senses</h2>
+        <div class="passive-row">
+          <div><span class="passive-num" id="passive-perception">10</span><label>Perception</label></div>
+          <div><span class="passive-num" id="passive-investigation">10</span><label>Investigation</label></div>
+          <div><span class="passive-num" id="passive-insight">10</span><label>Insight</label></div>
+        </div>
+      </section>
+
+    </div><!-- /tab-panel stats -->
+
+    <!-- ═══════════════════════════════════════════════════════
+         TAB: SKILLS — Skills · Proficiencies & Languages
+         ═══════════════════════════════════════════════════════ -->
+    <div class="tab-panel" data-tab="skills" role="tabpanel" aria-labelledby="tab-btn-skills">
+
+      <section class="card" id="skills-card">
+        <h2>Skills</h2>
+        <div class="skill-list" id="skill-list"></div>
+      </section>
+
+      <section class="card" id="proficiencies-card">
+        <h2>Proficiencies & Languages</h2>
+        <textarea data-bind="proficiencies" rows="4" placeholder="Armor, weapons, tools, languages..."></textarea>
+      </section>
+
+    </div><!-- /tab-panel skills -->
+
+    <!-- ═══════════════════════════════════════════════════════
+         TAB: EQUIPMENT — Gear · Currency
+         ═══════════════════════════════════════════════════════ -->
+    <div class="tab-panel" data-tab="equipment" role="tabpanel" aria-labelledby="tab-btn-equipment">
+
+      <section class="card" id="equipment-card">
+        <h2>Equipment</h2>
+        <textarea data-bind="equipment" rows="6"></textarea>
+        <div class="currency">
+          <div><label>CP</label><input type="number" data-bind="cp" value="0"></div>
+          <div><label>SP</label><input type="number" data-bind="sp" value="0"></div>
+          <div><label>EP</label><input type="number" data-bind="ep" value="0"></div>
+          <div><label>GP</label><input type="number" data-bind="gp" value="0"></div>
+          <div><label>PP</label><input type="number" data-bind="pp" value="0"></div>
+        </div>
+      </section>
+
+    </div><!-- /tab-panel equipment -->
+
+    </div><!-- /col-group 1 -->
+
+    <!-- ╔═══════════════════════════════════════════════════════╗
+         ║ COLUMN 2 (middle) — Combat · Spells                  ║
+         ╚═══════════════════════════════════════════════════════╝ -->
+    <div class="col-group" data-col="2">
+
+    <!-- ═══════════════════════════════════════════════════════
+         TAB: COMBAT — AC · HP · Death Saves · Attacks · Armor
+         ═══════════════════════════════════════════════════════ -->
+    <div class="tab-panel" data-tab="combat" role="tabpanel" aria-labelledby="tab-btn-combat">
+
+      <section class="card combat-top">
+        <div class="combat-stat">
+          <label>Armor Class</label>
+          <div class="stepper-row">
+            <button type="button" class="stepper-btn" data-step-target="ac" data-dir="-1" title="−1">&minus;</button>
+            <input type="number" data-bind="ac" value="10" class="stepper-input no-spinner">
+            <button type="button" class="stepper-btn" data-step-target="ac" data-dir="1"  title="+1">+</button>
+          </div>
+        </div>
+        <div class="combat-stat">
+          <label>Initiative</label>
+          <div class="stepper-row">
+            <button type="button" class="stepper-btn" id="init-down" title="−1">&minus;</button>
+            <input type="text" id="initiative" class="stepper-input" value="+0" inputmode="numeric">
+            <button type="button" class="stepper-btn" id="init-up" title="+1">+</button>
+          </div>
+        </div>
+        <div class="combat-stat">
+          <label>Speed</label>
+          <div class="stepper-row">
+            <button type="button" class="stepper-btn" data-step-target="speed" data-dir="-5" title="−5 ft">&minus;</button>
+            <input type="number" data-bind="speed" value="30" class="stepper-input no-spinner">
+            <button type="button" class="stepper-btn" data-step-target="speed" data-dir="5"  title="+5 ft">+</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card hp">
+        <h2>Hit Points</h2>
+        <div class="hp-grid">
+          <div>
+            <label>Max</label>
+            <div class="stepper-row">
+              <button type="button" class="stepper-btn" data-step-target="hpMax" data-dir="-1" title="−1">&minus;</button>
+              <input type="number" data-bind="hpMax" value="10" id="hp-max-input" class="stepper-input no-spinner">
+              <button type="button" class="stepper-btn" data-step-target="hpMax" data-dir="1"  title="+1">+</button>
+            </div>
+          </div>
+          <div>
+            <label>Current</label>
+            <div class="stepper-row">
+              <button type="button" class="stepper-btn" data-step-target="hpCurrent" data-dir="-1" title="−1">&minus;</button>
+              <input type="number" data-bind="hpCurrent" value="10" class="hp-current stepper-input no-spinner">
+              <button type="button" class="stepper-btn" data-step-target="hpCurrent" data-dir="1"  title="+1">+</button>
+            </div>
+          </div>
+          <div>
+            <label>Temp</label>
+            <div class="stepper-row">
+              <button type="button" class="stepper-btn" data-step-target="hpTemp" data-dir="-1" title="−1">&minus;</button>
+              <input type="number" data-bind="hpTemp" value="0" class="stepper-input no-spinner">
+              <button type="button" class="stepper-btn" data-step-target="hpTemp" data-dir="1"  title="+1">+</button>
+            </div>
+          </div>
+        </div>
+        <div class="autohp-row">
+          <input type="checkbox" data-bind="autoHP" id="autoHP">
+          <label for="autoHP">Auto-calc Max HP (PHB avg)</label>
+          <select data-bind="hitDie" id="hit-die-select" title="Hit die">
+            <option value="d6">d6</option>
+            <option value="d8">d8</option>
+            <option value="d10">d10</option>
+            <option value="d12">d12</option>
+          </select>
+        </div>
+        <div class="hp-bar"><div class="hp-bar-fill" id="hp-bar-fill"></div></div>
+        <div class="hp-actions">
+          <div class="stepper-row hp-delta-stepper">
+            <button type="button" class="stepper-btn" data-step-id="hp-delta" data-dir="-1" title="−1">&minus;</button>
+            <input type="number" id="hp-delta" placeholder="amount" class="stepper-input no-spinner">
+            <button type="button" class="stepper-btn" data-step-id="hp-delta" data-dir="1"  title="+1">+</button>
+          </div>
+          <button class="btn btn-sm" data-hp="damage">Damage</button>
+          <button class="btn btn-sm" data-hp="heal">Heal</button>
+        </div>
+        <div class="hp-grid">
+          <div>
+            <label>Hit Dice Total</label>
+            <input type="text" data-bind="hitDiceTotal" placeholder="1d10">
+          </div>
+          <div>
+            <label>Hit Dice Remaining</label>
+            <input type="text" data-bind="hitDiceCurrent" placeholder="1d10">
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="death-saves-card">
+        <h2>Death Saves</h2>
+        <div class="death-saves">
+          <div class="ds-row"><label>Successes</label>
+            <span class="ds-box" data-death="success" data-idx="0"></span>
+            <span class="ds-box" data-death="success" data-idx="1"></span>
+            <span class="ds-box" data-death="success" data-idx="2"></span>
+          </div>
+          <div class="ds-row"><label>Failures</label>
+            <span class="ds-box ds-fail" data-death="failure" data-idx="0"></span>
+            <span class="ds-box ds-fail" data-death="failure" data-idx="1"></span>
+            <span class="ds-box ds-fail" data-death="failure" data-idx="2"></span>
+          </div>
+        </div>
+
+        <div class="rp-section">
+          <div class="rp-header-row">
+            <span class="rp-section-label">Resources</span>
+          </div>
+          <div id="resource-pools"></div>
+          <div class="rp-add-row">
+            <input type="text" id="rp-new-name" placeholder="Custom pool name…">
+            <button class="btn btn-sm" id="btn-add-pool">+ Add</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card" id="attacks-card">
+        <h2>Attacks & Weapons</h2>
+        <table class="attacks-table">
+          <thead><tr><th>Name</th><th>Bonus</th><th>Damage / Type</th><th></th></tr></thead>
+          <tbody id="attacks-tbody"></tbody>
+        </table>
+        <button class="btn btn-sm" id="btn-add-attack">+ Add Attack</button>
+      </section>
+
+      <section class="card armor-section">
+        <h2>Armor</h2>
+        <div class="armor-slot">
+          <label>Armor</label>
+          <div class="armor-slot-field" data-slot="armorSlot"></div>
+          <div class="armor-enhance" id="armor-enhance" title="Magic enhancement (+N to AC). Range 0–10.">
+            <button type="button" id="armor-enhance-dn" class="stepper-btn" title="−1">&minus;</button>
+            <span id="armor-enhance-val">+0</span>
+            <button type="button" id="armor-enhance-up" class="stepper-btn" title="+1">+</button>
+          </div>
+        </div>
+        <div class="armor-slot">
+          <label>Shield</label>
+          <div class="armor-slot-field" data-slot="shieldSlot"></div>
+        </div>
+        <div class="armor-slot">
+          <label>Magic Item</label>
+          <div class="armor-slot-field" data-slot="magicArmor1"></div>
+        </div>
+        <div class="armor-slot">
+          <label>Magic Item</label>
+          <div class="armor-slot-field" data-slot="magicArmor2"></div>
+        </div>
+      </section>
+
+    </div><!-- /tab-panel combat -->
+
+    <!-- ═══════════════════════════════════════════════════════
+         TAB: SPELLS — All of Spellcasting
+         ═══════════════════════════════════════════════════════ -->
+    <div class="tab-panel" data-tab="spells" role="tabpanel" aria-labelledby="tab-btn-spells">
+
+      <section class="card" id="spells-card">
+        <h2>Spellcasting</h2>
+        <div class="spell-header">
+          <div>
+            <label>Ability</label>
+            <select data-bind="spellAbility">
+              <option value="">—</option>
+              <option value="int">Intelligence</option>
+              <option value="wis">Wisdom</option>
+              <option value="cha">Charisma</option>
+            </select>
+          </div>
+          <div>
+            <label>Save DC</label>
+            <div class="readout" id="spell-dc">8</div>
+          </div>
+          <div>
+            <label>Attack</label>
+            <div class="readout" id="spell-attack">+0</div>
+          </div>
+        </div>
+        <div class="spell-counts">
+          <div class="spell-count-row">
+            <div class="spell-count-title">Cantrips</div>
+            <div class="spell-count-fields">
+              <div class="spell-count-field">
+                <input type="number" data-bind="cantripsKnown" id="cantrips-known-input" min="0" max="30" value="0">
+                <label>Known</label>
+              </div>
+              <div class="spell-count-field">
+                <input type="number" data-bind="cantripsBonus" id="cantrips-bonus-input" min="0" max="30" value="0">
+                <label>Bonus</label>
+              </div>
+            </div>
+          </div>
+          <div class="spell-count-row">
+            <div class="spell-count-title">
+              <span>Spells</span>
+              <button type="button" id="spells-mode-toggle" class="btn btn-sm spells-mode-toggle hidden" title="Switch between Known and Prepared">⇆</button>
+            </div>
+            <div class="spell-count-fields">
+              <div class="spell-count-field">
+                <input type="number" data-bind="spellsKnown" id="spells-known-input" min="0" max="60" value="0">
+                <label id="spells-known-label">Known</label>
+              </div>
+              <div class="spell-count-field">
+                <input type="number" data-bind="spellsBonus" id="spells-bonus-input" min="0" max="60" value="0">
+                <label>Bonus</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="spell-slots" id="spell-slots"></div>
+        <div class="spell-list-wrap">
+          <div id="spell-picks-counters"></div>
+          <table class="spell-table">
+            <thead><tr><th>Lvl</th><th>Name</th><th>Prep</th><th></th></tr></thead>
+            <tbody id="spells-tbody"></tbody>
+          </table>
+          <button class="btn btn-sm" id="btn-add-spell">+ Add Spell</button>
+        </div>
+      </section>
+
+    </div><!-- /tab-panel spells -->
+
+    </div><!-- /col-group 2 -->
+
+    <!-- ╔═══════════════════════════════════════════════════════╗
+         ║ COLUMN 3 (right) — Features · Notes                  ║
+         ╚═══════════════════════════════════════════════════════╝ -->
+    <div class="col-group" data-col="3">
+
+    <!-- ═══════════════════════════════════════════════════════
+         TAB: FEATURES — Class Features · Feats · Features & Traits
+         ═══════════════════════════════════════════════════════ -->
+    <div class="tab-panel" data-tab="features" role="tabpanel" aria-labelledby="tab-btn-features">
+
+      <section class="card" id="class-features-card">
+        <h2>Class Features</h2>
+        <div id="class-features-wrap">
+          <p class="srd-hint">Pick a class to see its features.</p>
+        </div>
+      </section>
+
+      <section class="card" id="feats-card">
+        <h2>Feats</h2>
+        <div id="feats-list"></div>
+        <div class="feat-add-row">
+          <select id="feat-picker"><option value="">— add a feat —</option></select>
+          <button class="btn btn-sm" id="btn-add-feat">+ Add</button>
+        </div>
+        <button class="btn btn-sm" id="btn-add-custom-feat" style="margin-top:4px;width:100%">+ Custom Feat</button>
+      </section>
+
+      <section class="card" id="features-traits-card">
+        <h2>Features & Traits</h2>
+        <textarea data-bind="features" rows="8" placeholder="Racial traits, feats, custom features..."></textarea>
+      </section>
+
+    </div><!-- /tab-panel features -->
+
+    <!-- ═══════════════════════════════════════════════════════
+         TAB: NOTES — Personality · Notes
+         ═══════════════════════════════════════════════════════ -->
+    <div class="tab-panel" data-tab="notes" role="tabpanel" aria-labelledby="tab-btn-notes">
+
+      <section class="card" id="personality-card">
+        <h2>Personality</h2>
+        <label>Traits</label>
+        <textarea data-bind="traits" rows="2"></textarea>
+        <label>Ideals</label>
+        <textarea data-bind="ideals" rows="2"></textarea>
+        <label>Bonds</label>
+        <textarea data-bind="bonds" rows="2"></textarea>
+        <label>Flaws</label>
+        <textarea data-bind="flaws" rows="2"></textarea>
+      </section>
+
+      <section class="card" id="notes-card">
+        <h2>Notes</h2>
+        <textarea data-bind="notes" rows="6"></textarea>
+      </section>
+
+    </div><!-- /tab-panel notes -->
+
+    </div><!-- /col-group 3 -->
+
+  </div><!-- /tab-panels -->
+</main>
+
+<!-- Bottom tab bar — mobile only -->
+<nav class="tab-bar" role="tablist" aria-label="Character sheet sections">
+  <button class="tab-btn active" id="tab-btn-stats"     data-tab="stats"      role="tab" aria-selected="true"  aria-controls="tab-panel-stats">
+    <span class="tab-icon" aria-hidden="true">📋</span>
+    <span class="tab-label">Stats</span>
+  </button>
+  <button class="tab-btn" id="tab-btn-combat"           data-tab="combat"     role="tab" aria-selected="false" aria-controls="tab-panel-combat">
+    <span class="tab-icon" aria-hidden="true">⚔️</span>
+    <span class="tab-label">Combat</span>
+  </button>
+  <button class="tab-btn" id="tab-btn-skills"           data-tab="skills"     role="tab" aria-selected="false" aria-controls="tab-panel-skills">
+    <span class="tab-icon" aria-hidden="true">🎯</span>
+    <span class="tab-label">Skills</span>
+  </button>
+  <button class="tab-btn" id="tab-btn-spells"           data-tab="spells"     role="tab" aria-selected="false" aria-controls="tab-panel-spells">
+    <span class="tab-icon" aria-hidden="true">✨</span>
+    <span class="tab-label">Spells</span>
+  </button>
+  <button class="tab-btn" id="tab-btn-equipment"        data-tab="equipment"  role="tab" aria-selected="false" aria-controls="tab-panel-equipment">
+    <span class="tab-icon" aria-hidden="true">🎒</span>
+    <span class="tab-label">Equip</span>
+  </button>
+  <button class="tab-btn" id="tab-btn-features"         data-tab="features"   role="tab" aria-selected="false" aria-controls="tab-panel-features">
+    <span class="tab-icon" aria-hidden="true">⭐</span>
+    <span class="tab-label">Features</span>
+  </button>
+  <button class="tab-btn" id="tab-btn-notes"            data-tab="notes"      role="tab" aria-selected="false" aria-controls="tab-panel-notes">
+    <span class="tab-icon" aria-hidden="true">📝</span>
+    <span class="tab-label">Notes</span>
+  </button>
+</nav>
+
+<!-- SRD Lookup overlay -->
+<div id="srd-panel" class="srd-panel hidden">
+  <div class="srd-header">
+    <h2>SRD Lookup</h2>
+    <button id="srd-close" class="btn btn-sm">Close</button>
+  </div>
+  <div class="srd-tabs">
+    <button class="srd-tab active" data-type="spells">Spells</button>
+    <button class="srd-tab" data-type="monsters">Monsters</button>
+    <button class="srd-tab" data-type="magicitems">Magic Items</button>
+    <button class="srd-tab" data-type="weapons">Weapons</button>
+    <button class="srd-tab" data-type="armor">Armor</button>
+    <button class="srd-tab" data-type="classes">Classes</button>
+    <button class="srd-tab" data-type="races">Races</button>
+    <button class="srd-tab" data-type="backgrounds">Backgrounds</button>
+    <button class="srd-tab" data-type="conditions">Conditions</button>
+  </div>
+  <div class="srd-search">
+    <input type="text" id="srd-input" placeholder="Search SRD...">
+    <button id="srd-go" class="btn">Search</button>
+  </div>
+  <div class="srd-results" id="srd-results">
+    <p class="srd-hint">Pick a tab and search — data is fetched from open5e.com.</p>
+  </div>
+  <div class="srd-detail" id="srd-detail"></div>
+</div>
+
+<!-- Choice modal -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title">Choose</h2>
+      <button class="btn btn-sm" id="modal-close" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer">
+      <button class="btn" id="modal-cancel">Cancel</button>
+      <button class="btn btn-accent" id="modal-confirm">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Info / help dialog -->
+<div id="info-overlay" class="spell-popup-overlay hidden">
+  <div class="spell-popup info-popup">
+    <div class="spell-popup-header">
+      <h3>&#x2139; About & Formatting</h3>
+      <button id="info-close" class="icon-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="spell-popup-content">
+      <h4 class="info-h4">About this sheet</h4>
+      <p>A local-first D&amp;D 5e character sheet. Your character is auto-saved in this browser and can be downloaded as JSON with <b>Save</b>. Pull SRD class/race/background/feat/spell data from open5e to auto-fill choices and links.</p>
+
+      <h4 class="info-h4">Quick tips</h4>
+      <ul class="info-list">
+        <li><b>Rest</b> opens the rest dialog — Short rolls Hit Dice for healing, Long restores everything.</li>
+        <li>Click a spell name's <span class="info-icon">&#x2197;</span> to open its rules (with 2014 / 2024 / A5E tabs when multiple editions exist).</li>
+        <li>Ability scores show your <i>base</i> in the small box and the <i>final</i> below the modifier; +R / +L / +F tags break down where each bonus came from.</li>
+        <li>Pick a class to auto-populate hit dice, save proficiencies, spellcasting ability, and class-resource pools.</li>
+        <li><b>Offline:</b> the selected class / race / background are cached on the sheet, so class features, spell-slot tables, expected saves, and hit-die deviation keep rendering without a connection. Picking a new class / race / background needs the SRD API to be reachable.</li>
+      </ul>
+
+      <h4 class="info-h4">Non-standard highlight</h4>
+      <p>Fields that differ from your class's defaults get a subtle <span style="background:rgba(212,146,92,0.18);border:1px solid #d4925c;padding:1px 8px;border-radius:3px;color:#d4925c">amber</span> highlight. It's not an error — just a visual cue that you've gone off-spec. Hover the highlighted element for a tooltip explaining the deviation. Watched fields:</p>
+      <ul class="info-list">
+        <li><b>Hit Die</b> picker (e.g. Bard normally d8 — picking d12 flags it).</li>
+        <li><b>Saving Throw</b> checkbox (a save proficiency the class doesn't grant, or missing one it does).</li>
+        <li><b>Skill</b> checkbox (proficient without a class/race/background source, or an auto-granted skill that's been unchecked).</li>
+        <li><b>Cantrips picked</b> / <b>Spells picked</b> counter when the count exceeds Known + Bonus.</li>
+        <li><b>Feats</b> counter when you've added more feats than your ASI + Race slots provide.</li>
+      </ul>
+
+      <h4 class="info-h4">Subclass Supplement</h4>
+      <p>The SRD only contains <i>one</i> subclass per class (Circle of the Land, Champion, Thief, etc.). Other PHB subclasses (Circle of the Moon, Battle Master, Beast Master, etc.) aren't legally redistributable, so they aren't in any public API. You can load a community-curated supplement here.</p>
+      <ol class="info-list">
+        <li><b>Download the starter file</b> (PHB subclass names + levels + placeholders).</li>
+        <li>Open it in a text editor and fill in the <code>desc</code> text for each feature from your own copy of the PHB. The README at the bottom of the file documents the schema (skills, resource pools, etc.).</li>
+        <li><b>Upload the filled-in JSON</b> back here. The subclasses appear in the Subclass dropdown for the matching class.</li>
+      </ol>
+      <div class="supplement-actions">
+        <button id="btn-download-supplement-sample" class="btn">Download starter file</button>
+        <button id="btn-download-supplement-current" class="btn">Download my current</button>
+        <button id="btn-upload-supplement"          class="btn btn-accent">Upload supplement…</button>
+        <button id="btn-clear-supplement"           class="btn">Reset to Default</button>
+        <input type="file" id="supplement-file-input" accept=".json" hidden>
+      </div>
+      <p id="supplement-status" class="info-tip">No supplement loaded.</p>
+      <p class="info-tip">Tip: instead of editing the JSON file directly, you can fill in feature text using the in-app editor below. Use the <b>Paste raw text</b> box to bulk-fill from a wiki page.</p>
+      <div id="supplement-subclass-list" class="supplement-subclass-list"></div>
+
+      <h4 class="info-h4">Race Supplement</h4>
+      <p>The SRD only contains <i>one</i> subrace per race (High Elf, Hill Dwarf, Lightfoot Halfling, Rock Gnome). Use this section to add missing PHB races/subraces like Wood Elf, Drow, Mountain Dwarf, Stout Halfling, Forest Gnome, or homebrew races.</p>
+      <div class="supplement-actions">
+        <button id="btn-download-race-sample"  class="btn">Download starter file</button>
+        <button id="btn-download-race-current" class="btn">Download my current</button>
+        <button id="btn-upload-race"           class="btn btn-accent">Upload supplement…</button>
+        <button id="btn-clear-race"            class="btn">Reset to Default</button>
+        <input type="file" id="race-supplement-file-input" accept=".json" hidden>
+      </div>
+      <p id="race-supplement-status" class="info-tip">No race supplement loaded.</p>
+      <div id="supplement-race-list" class="supplement-subclass-list"></div>
+
+      <h4 class="info-h4">Data sources</h4>
+      <p>SRD content is pulled live from <a href="https://open5e.com" target="_blank" rel="noopener">open5e.com</a>, an aggregator of legally redistributable 5e material from these publishers:</p>
+      <ul class="info-source-list">
+        <li><a href="https://open5e.com"                                                target="_blank" rel="noopener">Open5e</a>           <span class="info-source-tag">aggregator + API</span></li>
+        <li><a href="https://dnd.wizards.com/resources/systems-reference-document"      target="_blank" rel="noopener">WotC SRD 5.1 (2014)</a> <span class="info-source-tag">wotc-srd / srd-2014</span></li>
+        <li><a href="https://www.dndbeyond.com/srd"                                     target="_blank" rel="noopener">WotC SRD 5.2 (2024)</a> <span class="info-source-tag">srd-2024</span></li>
+        <li><a href="https://a5esrd.com"                                                target="_blank" rel="noopener">Level Up: Advanced 5e</a> <span class="info-source-tag">a5e / a5e-ag — EN Publishing</span></li>
+        <li><a href="https://koboldpress.com"                                           target="_blank" rel="noopener">Kobold Press</a>      <span class="info-source-tag">Tome of Heroes (toh), Kobold Press (kp), Tome of Beasts (tob)</span></li>
+        <li><a href="https://koboldpress.com/black-flag/"                               target="_blank" rel="noopener">Black Flag Roleplaying</a> <span class="info-source-tag">blackflag</span></li>
+        <li><a href="https://darringtonpress.com"                                       target="_blank" rel="noopener">Darrington Press</a>  <span class="info-source-tag">Critical Role: Tal'Dorei (taldorei)</span></li>
+        <li><a href="https://open5e.com"                                                target="_blank" rel="noopener">Open5e Original Content</a> <span class="info-source-tag">o5e</span></li>
+      </ul>
+
+      <h4 class="info-h4">Markup formatting</h4>
+      <p>Long text fields (Personality, Features &amp; Traits, Proficiencies, Equipment, Notes) have a <b>Raw / Markup</b> toggle next to the heading. In Markup mode the following formatting renders:</p>
+
+      <table class="info-md-table">
+        <thead><tr><th>You type</th><th>Renders as</th></tr></thead>
+        <tbody>
+          <tr><td><code># Big heading</code></td><td><b style="font-size:1.05rem;color:var(--accent-strong);font-family:'Cinzel',Georgia,serif">Big heading</b></td></tr>
+          <tr><td><code>## Section</code></td><td><b style="color:var(--accent-strong);font-family:'Cinzel',Georgia,serif">Section</b></td></tr>
+          <tr><td><code>### Sub-section</code></td><td><b style="font-size:0.92rem;color:var(--accent-strong);font-family:'Cinzel',Georgia,serif">Sub-section</b></td></tr>
+          <tr><td><code>--- Cover Story ---</code></td><td><b style="font-size:0.92rem;color:var(--accent-strong);font-family:'Cinzel',Georgia,serif">Cover Story</b> <span style="color:var(--text-faint);font-size:0.75rem">(legacy)</span></td></tr>
+          <tr><td><code>**bold**</code></td><td><b>bold</b></td></tr>
+          <tr><td><code>*italic*</code></td><td><i>italic</i></td></tr>
+          <tr><td><code>`code`</code></td><td><code>code</code></td></tr>
+          <tr><td><code>- bullet item</code></td><td>&bull;&nbsp;bullet item</td></tr>
+          <tr><td><code>[link text](https://example.com)</code></td><td><a href="#" style="color:var(--accent)">link text</a></td></tr>
+          <tr><td><code>---</code></td><td><hr style="margin:4px 0;border:none;border-top:1px solid var(--border)"></td></tr>
+        </tbody>
+      </table>
+      <p class="info-tip">Tip: Markup view is read-only — toggle back to Raw to edit.</p>
+
+      <hr class="info-legal-divider">
+      <p class="info-legal">
+        <em>Dungeons &amp; Dragons</em>, <em>D&amp;D</em>, and all associated marks are trademarks of
+        <a href="https://company.wizards.com" target="_blank" rel="noopener">Wizards of the Coast LLC</a>.
+        This tool is an independent, unofficial fan project and is not affiliated with, endorsed by, or
+        sponsored by Wizards of the Coast. SRD content used under
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC-BY 4.0</a>.
+        Tool source code &copy; SlushpuppieT, released under the
+        <a href="https://github.com/SlushpuppieT/dnd5charsheet/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a>.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- Spell rules popup -->
+<div id="spell-popup-overlay" class="spell-popup-overlay hidden">
+  <div class="spell-popup">
+    <div class="spell-popup-header">
+      <h3 id="spell-popup-title">Spell</h3>
+      <button id="spell-popup-close" class="icon-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="spell-popup-tabs" id="spell-popup-tabs"></div>
+    <div class="spell-popup-content" id="spell-popup-content"></div>
+  </div>
+</div>
+
+<!-- Class / Race / Background detail popup (right-click or ↗ link) -->
+<div id="preset-popup-overlay" class="spell-popup-overlay hidden">
+  <div class="spell-popup preset-popup">
+    <div class="spell-popup-header">
+      <h3 id="preset-popup-title">Details</h3>
+      <button id="preset-popup-close" class="icon-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="spell-popup-content" id="preset-popup-content"></div>
+  </div>
+</div>
+
+<!-- Hover quick-summary card (mouseenter on Class/Race/Background select) -->
+<div id="preset-hover-card" class="preset-hover-card hidden" aria-hidden="true"></div>
+
+<!-- Subclass editor modal -->
+<div id="subclass-editor-overlay" class="spell-popup-overlay hidden">
+  <div class="spell-popup subclass-editor">
+    <div class="spell-popup-header">
+      <h3 id="subclass-editor-title">Edit Subclass</h3>
+      <button id="subclass-editor-close" class="icon-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="spell-popup-content" id="subclass-editor-body"></div>
+  </div>
+</div>
+
+<!-- Race editor modal -->
+<div id="race-editor-overlay" class="spell-popup-overlay hidden">
+  <div class="spell-popup subclass-editor">
+    <div class="spell-popup-header">
+      <h3 id="race-editor-title">Edit Race</h3>
+      <button id="race-editor-close" class="icon-btn" aria-label="Close">&times;</button>
+    </div>
+    <div class="spell-popup-content" id="race-editor-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="Supplements/starters.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
