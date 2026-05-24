@@ -1355,8 +1355,16 @@ function renderAttacks() {
   });
   tbody.querySelectorAll('button[data-atk-del]').forEach(btn => {
     btn.addEventListener('click', e => {
-      character.attacks.splice(Number(e.target.dataset.atkDel), 1);
-      renderAttacks();
+      e.stopPropagation();
+      const idx = Number(e.target.dataset.atkDel);
+      const atk = character.attacks[idx];
+      const label = (atk && atk.name && atk.name.trim()) ? `<strong>${escapeHTML(atk.name.trim())}</strong>` : 'the unnamed attack';
+      confirmDel(`Are you sure you want to remove ${label}?`, () => {
+        character.attacks.splice(idx, 1);
+        renderAttacks();
+        persist();
+        return true;
+      });
     });
   });
 }
@@ -2665,9 +2673,17 @@ function renderSpells() {
   });
   tbody.querySelectorAll('button[data-spell-del]').forEach(btn => {
     btn.addEventListener('click', e => {
-      character.spells.splice(Number(e.target.dataset.spellDel), 1);
-      renderSpells();
-      renderSpellPicksCounters();
+      e.stopPropagation();
+      const idx = Number(e.target.dataset.spellDel);
+      const spell = character.spells[idx];
+      const label = (spell && spell.name && spell.name.trim()) ? `<strong>${escapeHTML(spell.name.trim())}</strong>` : 'the unnamed spell';
+      confirmDel(`Are you sure you want to remove ${label}?`, () => {
+        character.spells.splice(idx, 1);
+        renderSpells();
+        renderSpellPicksCounters();
+        persist();
+        return true;
+      });
     });
   });
   tbody.querySelectorAll('button[data-spell-always]').forEach(btn => {
@@ -3876,6 +3892,33 @@ function hideModal() {
   $('#modal-overlay').classList.add('hidden');
   _modalConfirm = null;
   $('#modal-body').innerHTML = '';
+  // Reset confirm button to its default accent style after any modal
+  const confirmBtn = $('#modal-confirm');
+  if (confirmBtn) {
+    confirmBtn.classList.remove('btn-danger');
+    confirmBtn.classList.add('btn-accent');
+  }
+}
+
+/**
+ * Show a destructive-action confirmation modal.
+ * The confirm button is styled red; onConfirm should return true to close.
+ *
+ * @param {string}   message   Full sentence shown to the user (already safe to display).
+ * @param {Function} onConfirm Called when the user clicks "Remove".
+ */
+function confirmDel(message, onConfirm) {
+  const confirmBtn = $('#modal-confirm');
+  if (confirmBtn) {
+    confirmBtn.classList.remove('btn-accent');
+    confirmBtn.classList.add('btn-danger');
+  }
+  showModal({
+    title: 'Confirm Removal',
+    bodyHTML: `<p class="confirm-del-msg">${message}</p>`,
+    confirmText: 'Remove',
+    onConfirm,
+  });
 }
 function wireModal() {
   $('#modal-close').addEventListener('click', hideModal);
@@ -6788,13 +6831,17 @@ function renderFeats() {
       e.stopPropagation();
       const idx = Number(btn.dataset.featDel);
       const removed = character.feats[idx];
-      // Subtract feat's speed bonus before removing
-      if (removed && removed.speedBonus) {
-        character.speed = Math.max(0, (character.speed || 0) - Number(removed.speedBonus));
-      }
-      character.feats.splice(idx, 1);
-      renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
-      renderFeats(); persist();
+      const label = (removed && removed.name && removed.name.trim()) ? `<strong>${escapeHTML(removed.name.trim())}</strong>` : 'this unnamed feat';
+      confirmDel(`Are you sure you want to remove the feat ${label}?`, () => {
+        // Subtract feat's speed bonus before removing
+        if (removed && removed.speedBonus) {
+          character.speed = Math.max(0, (character.speed || 0) - Number(removed.speedBonus));
+        }
+        character.feats.splice(idx, 1);
+        renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
+        renderFeats(); persist();
+        return true;
+      });
     });
   });
 }

@@ -253,6 +253,22 @@ input[type="checkbox"] {
   font-weight: 600;
 }
 .btn-accent:hover { background: var(--accent-strong); }
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+  font-weight: 600;
+}
+.btn-danger:hover { filter: brightness(1.15); }
+
+/* Confirmation delete message inside the modal */
+.confirm-del-msg {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+.confirm-del-msg strong { color: var(--accent-strong); }
 
 /* ===== Layout ===== */
 .sheet {
