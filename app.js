@@ -91,7 +91,7 @@ function blankCharacter() {
     spellSlots: {},          // { 1: { total, used }, ... }
     spells: [],              // [{ level, name, prepared, alwaysPrepared, notes }]
 
-    skillSources: {},        // { acrobatics: 'class'|'subclass'|'subclass-pick'|'background'|'bg-pick'|'race' }
+    skillSources: {},        // { acrobatics: 'class'|'subclass'|'subclass-pick'|'subclass-free'|'background'|'bg-pick'|'bg-free'|'race'|'race-pick'|'race-free' }
     classSkillCount: 0,      // how many class skill picks are allowed
     classSkillOptions: 'any',// 'any' or array of skill names
     bgSkillCount: 0,         // how many background CHOICE skill picks are allowed
@@ -323,12 +323,14 @@ function renderSaves() {
 }
 
 function skillSrcLabel(src) {
-  return { class: 'CLASS', subclass: 'SUB', 'subclass-pick': 'SUB', background: 'BG', 'bg-pick': 'BG', race: 'RACE', 'race-pick': 'RACE' }[src] || src.toUpperCase();
+  return { class: 'CLASS', subclass: 'SUB', 'subclass-pick': 'SUB', 'subclass-free': 'SUB',
+           background: 'BG', 'bg-pick': 'BG', 'bg-free': 'BG',
+           race: 'RACE', 'race-pick': 'RACE', 'race-free': 'RACE' }[src] || src.toUpperCase();
 }
 function skillSrcCssClass(src) {
-  if (src === 'bg-pick')       return 'background';
-  if (src === 'subclass-pick') return 'subclass';
-  if (src === 'race-pick')     return 'race';
+  if (src === 'bg-pick'       || src === 'bg-free')       return 'background';
+  if (src === 'subclass-pick' || src === 'subclass-free') return 'subclass';
+  if (src === 'race-pick'     || src === 'race-free')     return 'race';
   return src;
 }
 
@@ -353,31 +355,44 @@ function renderSkills() {
     list.appendChild(el);
   }
   const vals = Object.values(sources);
-  const classCount      = character.classSkillCount || 0;
-  const classUsed       = vals.filter(s => s === 'class').length;
-  const bgChoiceCount   = character.bgSkillCount || 0;
-  const bgFixedCount    = character.bgFixedCount  || 0;
-  const bgTotalCount    = bgFixedCount + bgChoiceCount;
-  const bgAutoUsed      = vals.filter(s => s === 'background').length;
-  const bgChoiceUsed    = vals.filter(s => s === 'bg-pick').length;
-  const bgTotalUsed     = bgAutoUsed + bgChoiceUsed;
-  const subFixedSkills  = character.subclassFixedSkills || [];
-  const subFixedTotal   = subFixedSkills.length;
-  const subFixedHave    = subFixedSkills.filter(k => character.skills[k] && character.skills[k].prof).length;
-  const subChoiceCount  = character.subclassSkillCount || 0;
-  const subChoiceUsed   = vals.filter(s => s === 'subclass-pick').length;
-  const subTotalCount   = subFixedTotal + subChoiceCount;
-  const subTotalUsed    = subFixedHave + subChoiceUsed;
-  const subMissingFixed = subFixedSkills.filter(k => !(character.skills[k] && character.skills[k].prof));
+  const classCount         = character.classSkillCount || 0;
+  const classUsed          = vals.filter(s => s === 'class').length;
+  const bgChoiceCount      = character.bgSkillCount || 0;
+  const bgFixedCount       = character.bgFixedCount  || 0;
+  const bgTotalCount       = bgFixedCount + bgChoiceCount;
+  const bgAutoUsed         = vals.filter(s => s === 'background').length;
+  const bgChoiceUsed       = vals.filter(s => s === 'bg-pick').length;
+  // Free picks are earned when a fixed grant is blocked by another fixed source.
+  const bgFreePicksEarned  = Math.max(0, bgFixedCount - bgAutoUsed);
+  const bgFreePicksUsed    = vals.filter(s => s === 'bg-free').length;
+  const bgFreeRemaining    = Math.max(0, bgFreePicksEarned - bgFreePicksUsed);
+  const bgTotalUsed        = bgAutoUsed + bgChoiceUsed + bgFreePicksUsed;
 
-  const raceFixedSkills = character.raceFixedSkills || [];
-  const raceFixedTotal  = raceFixedSkills.length;
-  const raceFixedHave   = raceFixedSkills.filter(k => character.skills[k] && character.skills[k].prof).length;
-  const raceChoiceCount = character.raceSkillCount || 0;
-  const raceChoiceUsed  = vals.filter(s => s === 'race-pick').length;
-  const raceTotalCount  = raceFixedTotal + raceChoiceCount;
-  const raceTotalUsed   = raceFixedHave + raceChoiceUsed;
-  const raceMissingFixed = raceFixedSkills.filter(k => !(character.skills[k] && character.skills[k].prof));
+  const subFixedSkills     = character.subclassFixedSkills || [];
+  const subFixedTotal      = subFixedSkills.length;
+  const subAutoUsed        = vals.filter(s => s === 'subclass').length;
+  const subFreePicksEarned = Math.max(0, subFixedTotal - subAutoUsed);
+  const subFreePicksUsed   = vals.filter(s => s === 'subclass-free').length;
+  const subFreeRemaining   = Math.max(0, subFreePicksEarned - subFreePicksUsed);
+  const subFixedHave       = subFixedSkills.filter(k => character.skills[k] && character.skills[k].prof).length;
+  const subChoiceCount     = character.subclassSkillCount || 0;
+  const subChoiceUsed      = vals.filter(s => s === 'subclass-pick').length;
+  const subTotalCount      = subFixedTotal + subChoiceCount;
+  const subTotalUsed       = subAutoUsed + subChoiceUsed + subFreePicksUsed;
+  const subMissingFixed    = subFixedSkills.filter(k => !(character.skills[k] && character.skills[k].prof));
+
+  const raceFixedSkills    = character.raceFixedSkills || [];
+  const raceFixedTotal     = raceFixedSkills.length;
+  const raceAutoUsed       = vals.filter(s => s === 'race').length;
+  const raceFreePicksEarned = Math.max(0, raceFixedTotal - raceAutoUsed);
+  const raceFreePicksUsed  = vals.filter(s => s === 'race-free').length;
+  const raceFreeRemaining  = Math.max(0, raceFreePicksEarned - raceFreePicksUsed);
+  const raceFixedHave      = raceFixedSkills.filter(k => character.skills[k] && character.skills[k].prof).length;
+  const raceChoiceCount    = character.raceSkillCount || 0;
+  const raceChoiceUsed     = vals.filter(s => s === 'race-pick').length;
+  const raceTotalCount     = raceFixedTotal + raceChoiceCount;
+  const raceTotalUsed      = raceAutoUsed + raceChoiceUsed + raceFreePicksUsed;
+  const raceMissingFixed   = raceFixedSkills.filter(k => !(character.skills[k] && character.skills[k].prof));
 
   const expAvail = expertiseSlots();
   const expUsed  = allSkills().filter(s => character.skills[s.key]?.exp).length;
@@ -388,35 +403,60 @@ function renderSkills() {
   if (raceTotalCount > 0)  makeCounter('Race skills',       raceTotalUsed, raceTotalCount, 'counter-race');
   if (expAvail > 0)        makeCounter('Expertise (×2)',    expUsed,      expAvail,       'counter-exp');
 
-  // Pre-compute eligibility for hint tags
-  const classRemaining = classCount - classUsed;
-  const bgRemaining    = bgChoiceCount - bgChoiceUsed;
-  const subRemaining   = subTotalCount - subTotalUsed;
-  const raceRemaining  = raceTotalCount - raceTotalUsed;
+  // Pre-compute eligibility and hint sources for skill tags
+  const classRemaining  = classCount - classUsed;
+  const bgRemaining     = bgChoiceCount - bgChoiceUsed;
+  const subRemaining    = subTotalCount - subTotalUsed;
+  const raceRemaining   = raceTotalCount - raceTotalUsed;
+
+  // Which source type to embed in hints: regular pick when slots remain,
+  // free pick (from a displaced fixed grant) when only those remain.
+  const bgHintSrc       = bgRemaining > 0 ? 'bg-pick' : 'bg-free';
+  const subChoiceRem    = subChoiceCount - subChoiceUsed;
+  const subHintSrc      = (subMissingFixed.length > 0 || subChoiceRem > 0) ? 'subclass-pick' : 'subclass-free';
+  const raceChoiceRem   = raceChoiceCount - raceChoiceUsed;
+  const raceHintSrc     = (raceMissingFixed.length > 0 || raceChoiceRem > 0) ? 'race-pick' : 'race-free';
+
   function isClassEligible(key) {
     if (classRemaining <= 0) return false;
     const opts = character.classSkillOptions;
     return opts === 'any' || (Array.isArray(opts) && opts.some(n => findSkill(n)?.key === key));
   }
   function isBgEligible(key) {
-    if (bgRemaining <= 0) return false;
-    const bgOpts = character.bgSkillOptions;
-    return bgOpts === 'any' || (Array.isArray(bgOpts) && bgOpts.some(n => findSkill(n)?.key === key));
+    // Regular choice slots (e.g. "pick any 2") — respects the options list
+    if (bgRemaining > 0) {
+      const bgOpts = character.bgSkillOptions;
+      if (bgOpts === 'any' || (Array.isArray(bgOpts) && bgOpts.some(n => findSkill(n)?.key === key))) return true;
+    }
+    // Free pick earned when a fixed grant was blocked by another fixed source — any skill qualifies
+    if (bgFreeRemaining > 0) return true;
+    return false;
   }
   function isSubEligible(key) {
-    if (subRemaining <= 0) return false;
+    // Missing fixed grants take priority — must fill those specific slots first
     if (subMissingFixed.length > 0) return subMissingFixed.includes(key);
-    const opts = character.subclassSkillOptions;
-    return opts === 'any' || (Array.isArray(opts) && opts.some(n => findSkill(n)?.key === key));
+    // Choice slots
+    if (subChoiceRem > 0) {
+      const opts = character.subclassSkillOptions;
+      return opts === 'any' || (Array.isArray(opts) && opts.some(n => findSkill(n)?.key === key));
+    }
+    // Free pick from a displaced fixed grant — any skill qualifies
+    if (subFreeRemaining > 0) return true;
+    return false;
   }
   function isRaceEligible(key) {
-    if (raceRemaining <= 0) return false;
     if (raceMissingFixed.length > 0) return raceMissingFixed.includes(key);
-    const opts = character.raceSkillOptions;
-    return opts === 'any' || (Array.isArray(opts) && opts.some(n => findSkill(n)?.key === key));
+    if (raceChoiceRem > 0) {
+      const opts = character.raceSkillOptions;
+      return opts === 'any' || (Array.isArray(opts) && opts.some(n => findSkill(n)?.key === key));
+    }
+    if (raceFreeRemaining > 0) return true;
+    return false;
   }
 
-  const srcTitle = { class: 'class', subclass: 'subclass', 'subclass-pick': 'subclass (chosen)', background: 'background', 'bg-pick': 'background (chosen)', race: 'race' };
+  const srcTitle = { class: 'class', subclass: 'subclass', 'subclass-pick': 'subclass (chosen)', 'subclass-free': 'subclass (free pick)',
+                     background: 'background', 'bg-pick': 'background (chosen)', 'bg-free': 'background (free pick)',
+                     race: 'race', 'race-pick': 'race (chosen)', 'race-free': 'race (free pick)' };
 
   // Treat a checked skill as "non-standard" when it doesn't trace back to any
   // class / race / bg / sub source — but only flag if a class/race/bg actually
@@ -473,23 +513,34 @@ function renderSkills() {
       // This fixes the case where all bgSkillOptions entries are already class/race
       // proficient — the hollow hint appears alongside the existing tag so the user
       // can swap the source in one click (e.g. class→BG frees the class slot).
-      const isUserPick = src === 'class' || src === 'bg-pick' || src === 'subclass-pick' || src === 'race-pick';
+      // Free picks (bg-free/race-free/subclass-free) are also user-chosen and re-assignable.
+      const isUserPick = src === 'class' || src === 'bg-pick' || src === 'bg-free'
+                      || src === 'subclass-pick' || src === 'subclass-free'
+                      || src === 'race-pick'     || src === 'race-free';
       if (isUserPick) {
         const reHints = [];
-        if (src !== 'class'         && isClassEligible(s.key)) reHints.push({ label: 'CLASS', css: 'class',      src: 'class',         title: 'Reassign as a class pick (frees current slot)' });
-        if (src !== 'bg-pick'       && isBgEligible(s.key))    reHints.push({ label: 'BG',    css: 'background', src: 'bg-pick',       title: 'Reassign as a background pick (frees current slot)' });
-        if (src !== 'subclass-pick' && isSubEligible(s.key))   reHints.push({ label: 'SUB',   css: 'subclass',   src: 'subclass-pick', title: 'Reassign as a subclass pick (frees current slot)' });
-        if (src !== 'race-pick'     && isRaceEligible(s.key))  reHints.push({ label: 'RACE',  css: 'race',       src: 'race-pick',     title: 'Reassign as a race pick (frees current slot)' });
+        if (src !== 'class'
+            && isClassEligible(s.key))
+          reHints.push({ label: 'CLASS', css: 'class',      src: 'class',      title: 'Reassign as a class pick (frees current slot)' });
+        if (src !== 'bg-pick' && src !== 'bg-free'
+            && isBgEligible(s.key))
+          reHints.push({ label: 'BG',    css: 'background', src: bgHintSrc,    title: bgHintSrc === 'bg-free' ? 'Reassign as a background free pick (frees current slot)' : 'Reassign as a background pick (frees current slot)' });
+        if (src !== 'subclass-pick' && src !== 'subclass-free'
+            && isSubEligible(s.key))
+          reHints.push({ label: 'SUB',   css: 'subclass',   src: subHintSrc,   title: subHintSrc === 'subclass-free' ? 'Reassign as a subclass free pick (frees current slot)' : 'Reassign as a subclass pick (frees current slot)' });
+        if (src !== 'race-pick' && src !== 'race-free'
+            && isRaceEligible(s.key))
+          reHints.push({ label: 'RACE',  css: 'race',       src: raceHintSrc,  title: raceHintSrc === 'race-free' ? 'Reassign as a race free pick (frees current slot)' : 'Reassign as a race pick (frees current slot)' });
         tagHtml += reHints.map(h =>
           `<span class="skill-src-tag skill-src-${h.css} skill-src-hint clickable" data-skill-tag="${s.key}" data-tag-source="${h.src}" data-tag-action="assign" title="${h.title}">${h.label}</span>`
         ).join('');
       }
     } else if (!st.prof) {
       const hints = [];
-      if (isClassEligible(s.key)) hints.push({ label: 'CLASS', css: 'class',         src: 'class',          title: 'Click to take as a class pick' });
-      if (isBgEligible(s.key))    hints.push({ label: 'BG',    css: 'background',    src: 'bg-pick',        title: 'Click to take as a background pick' });
-      if (isSubEligible(s.key))   hints.push({ label: 'SUB',   css: 'subclass',      src: 'subclass-pick',  title: 'Click to take as a subclass pick' });
-      if (isRaceEligible(s.key))  hints.push({ label: 'RACE',  css: 'race',          src: 'race-pick',      title: 'Click to take as a race pick' });
+      if (isClassEligible(s.key)) hints.push({ label: 'CLASS', css: 'class',      src: 'class',      title: 'Click to take as a class pick' });
+      if (isBgEligible(s.key))    hints.push({ label: 'BG',    css: 'background', src: bgHintSrc,    title: bgHintSrc === 'bg-free' ? 'Click to take as a background free pick' : 'Click to take as a background pick' });
+      if (isSubEligible(s.key))   hints.push({ label: 'SUB',   css: 'subclass',   src: subHintSrc,   title: subHintSrc === 'subclass-free' ? 'Click to take as a subclass free pick' : 'Click to take as a subclass pick' });
+      if (isRaceEligible(s.key))  hints.push({ label: 'RACE',  css: 'race',       src: raceHintSrc,  title: raceHintSrc === 'race-free' ? 'Click to take as a race free pick' : 'Click to take as a race pick' });
       tagHtml = hints.map(h =>
         `<span class="skill-src-tag skill-src-${h.css} skill-src-hint clickable" data-skill-tag="${s.key}" data-tag-source="${h.src}" data-tag-action="assign" title="${h.title}">${h.label}</span>`
       ).join('');
@@ -604,7 +655,7 @@ function renderSkills() {
           character.expertiseOrder = (character.expertiseOrder || []).filter(k => k !== key);
           // Unchecking a user-pick frees it (auto-grants remain)
           const s = character.skillSources[key];
-          if (s === 'class' || s === 'bg-pick' || s === 'subclass-pick' || s === 'race-pick') delete character.skillSources[key];
+          if (s === 'class' || s === 'bg-pick' || s === 'bg-free' || s === 'subclass-pick' || s === 'subclass-free' || s === 'race-pick' || s === 'race-free') delete character.skillSources[key];
         }
       }
       renderSkills();
@@ -5345,7 +5396,7 @@ function clearRace() {
   clearAutoSource('race');
   const src = character.skillSources || {};
   Object.keys(src).forEach(key => {
-    if (src[key] === 'race' || src[key] === 'race-pick') {
+    if (src[key] === 'race' || src[key] === 'race-pick' || src[key] === 'race-free') {
       if (character.skills[key]) character.skills[key].prof = false;
       delete src[key];
     }
@@ -5359,6 +5410,8 @@ function clearRace() {
   character.raceFixedSkills = [];
   character.baseSpeed       = 0;
   character.cachedRace      = null;
+  // Re-apply other fixed grants so they can reclaim any slots the race was holding.
+  reapplyOtherFixedGrants('race');
   renderAll();
   persist();
   toast('Race cleared');
@@ -5368,7 +5421,7 @@ function clearBackground() {
   clearAutoSource('background');
   const src = character.skillSources || {};
   Object.keys(src).forEach(key => {
-    if (src[key] === 'background' || src[key] === 'bg-pick') {
+    if (src[key] === 'background' || src[key] === 'bg-pick' || src[key] === 'bg-free') {
       if (character.skills[key]) character.skills[key].prof = false;
       delete src[key];
     }
@@ -5379,6 +5432,8 @@ function clearBackground() {
   character.bgFixedCount = 0;
   character.bgSkillOptions = 'any';
   character.cachedBackground = null;
+  // Re-apply other fixed grants so they can reclaim any slots the background was holding.
+  reapplyOtherFixedGrants('background');
   renderAll();
   persist();
   toast('Background cleared');
@@ -5482,10 +5537,32 @@ function ensureSkillProf(key, source) {
   }
 }
 
+/**
+ * After clearing or re-applying one source's fixed grants, re-run the other
+ * sources' fixed grants so they can claim any newly-freed slots (or so the
+ * free-pick counts re-compute correctly). `exceptSource` is the source that
+ * just ran — we skip it to avoid double-processing.
+ */
+function reapplyOtherFixedGrants(exceptSource) {
+  if (exceptSource !== 'background' && character.cachedBackground) {
+    const sc = parseSkillChoice(character.cachedBackground.skill_proficiencies);
+    (sc ? sc.fixed || [] : []).forEach(n => {
+      const s = findSkill(n);
+      if (s) ensureSkillProf(s.key, 'background');
+    });
+  }
+  if (exceptSource !== 'race') {
+    (character.raceFixedSkills || []).forEach(k => ensureSkillProf(k, 'race'));
+  }
+  if (exceptSource !== 'subclass') {
+    (character.subclassFixedSkills || []).forEach(k => ensureSkillProf(k, 'subclass'));
+  }
+}
+
 function clearSubclassSkillGrants() {
   const src = character.skillSources || {};
   Object.keys(src).forEach(key => {
-    if (src[key] === 'subclass' || src[key] === 'subclass-pick') {
+    if (src[key] === 'subclass' || src[key] === 'subclass-pick' || src[key] === 'subclass-free') {
       if (character.skills[key]) character.skills[key].prof = false;
       delete src[key];
     }
@@ -5508,7 +5585,7 @@ function applyRace(value) {
     clearAutoSource('race');
     const src = character.skillSources || {};
     Object.keys(src).forEach(key => {
-      if (src[key] === 'race' || src[key] === 'race-pick') {
+      if (src[key] === 'race' || src[key] === 'race-pick' || src[key] === 'race-free') {
         if (character.skills[key]) character.skills[key].prof = false;
         delete src[key];
       }
@@ -5555,6 +5632,8 @@ function applyRace(value) {
   ]);
   grants.forEach(k => ensureSkillProf(k, 'race'));
   character.raceFixedSkills = Array.from(grants);
+  // Re-apply background/subclass fixed grants in case any slots were freed or contested
+  reapplyOtherFixedGrants('race');
 
   // Append traits & languages to readable fields. Each generated block ends
   // with `---` so Markup view shows a visible separator between sections.
@@ -5686,7 +5765,7 @@ function applyBackground(slug) {
     clearAutoSource('background');
     const src = character.skillSources || {};
     Object.keys(src).forEach(key => {
-      if (src[key] === 'background' || src[key] === 'bg-pick') {
+      if (src[key] === 'background' || src[key] === 'bg-pick' || src[key] === 'bg-free') {
         if (character.skills[key]) character.skills[key].prof = false;
         delete src[key];
       }
@@ -5708,6 +5787,8 @@ function applyBackground(slug) {
     character.bgFixedCount = fixedSkills.length;
     // Auto-grant any fixed skills (e.g. "Deception" in "Deception, and either Insight or SoH")
     fixedSkills.forEach(n => { const s = findSkill(n); if (s) ensureSkillProf(s.key, 'background'); });
+    // Re-apply race/subclass fixed grants in case any slots were freed or contested
+    reapplyOtherFixedGrants('background');
     // Open a choice modal for the pick portion (if any)
     if (sc.count) {
       character.bgSkillCount = sc.count;
@@ -5769,7 +5850,7 @@ function applyCustomBackground() {
   clearAutoSource('background');
   const src = character.skillSources || {};
   Object.keys(src).forEach(key => {
-    if (src[key] === 'background' || src[key] === 'bg-pick') {
+    if (src[key] === 'background' || src[key] === 'bg-pick' || src[key] === 'bg-free') {
       if (character.skills[key]) character.skills[key].prof = false;
       delete src[key];
     }
