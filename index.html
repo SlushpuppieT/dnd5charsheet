@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>D&D 5e Character Sheet</title>
-<link rel="stylesheet" href="style.css?v=20260524i">
+<link rel="stylesheet" href="style.css?v=20260524k">
 </head>
 <body>
 
@@ -123,10 +123,12 @@
       </div>
       <div>
         <label>Experience</label>
-        <div class="stepper-row">
-          <button type="button" class="stepper-btn" data-step-target="experience" data-dir="-25" title="−25 XP">&minus;</button>
+        <div class="stepper-row stepper-row-stacked">
           <input type="number" data-bind="experience" min="0" value="0" class="stepper-input no-spinner">
-          <button type="button" class="stepper-btn" data-step-target="experience" data-dir="25"  title="+25 XP">+</button>
+          <div class="stepper-stack">
+            <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="experience" data-dir="25"  title="+25 XP">+</button>
+            <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="experience" data-dir="-25" title="−25 XP">&minus;</button>
+          </div>
         </div>
       </div>
       <div><label>Proficiency</label><div class="readout" id="prof-bonus">+2</div></div>
@@ -739,6 +741,6 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="Supplements/starters.js"></script>
-<script src="app.js?v=20260524p"></script>
+<script src="app.js?v=20260524r"></script>
 </body>
 </html>

@@ -2064,7 +2064,10 @@ function pickPreset(preset, slug) {
     if (preset === 'class') {
       character.subclassSlug = '';
       character.subclass     = '';
+      character.spellAbility = '';   // reset; user can pick manually for their custom class
       renderClassFeatures();
+      renderSpellcasting();          // unlocks auto-filled fields
+      applyBindingsToInputs();       // syncs the Ability dropdown back to —
     }
     if (preset === 'background') applyCustomBackground();
     const input = $(`input[data-bind="${preset}"]`);
