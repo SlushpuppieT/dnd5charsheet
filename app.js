@@ -247,7 +247,8 @@ function renderAbilities() {
     const totalTitle = hasBonus ? `Final = ${titleParts.join(' ')}` : 'Final score';
 
     const cell = document.createElement('div');
-    cell.className = 'ability';
+    cell.className = 'ability' + (total > 20 ? ' ability--over-cap' : '');
+    if (total > 20) cell.title = `${a.name} is ${total} — above the normal cap of 20`;
     cell.innerHTML = `
       <div class="name">${a.name}</div>
       <div class="mod">${fmtMod(mod)}</div>

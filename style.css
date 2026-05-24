@@ -423,6 +423,15 @@ input[type="checkbox"] {
   text-align: center;
   position: relative;
 }
+/* Score exceeds the normal PHB cap of 20 — flag it visually */
+.ability--over-cap {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger), inset 0 0 6px rgba(0,0,0,0.1);
+}
+.ability--over-cap .ab-total {
+  color: var(--danger);
+}
+
 .ability .name {
   font-size: 0.7rem;
   text-transform: uppercase;
