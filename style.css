@@ -2318,6 +2318,27 @@ input.hb-deviation {
   padding: 1px 5px;
   white-space: nowrap;
 }
+.feat-asi-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: #6fa8d4;
+  background: rgba(111,168,212,0.12);
+  border-radius: 4px;
+  padding: 1px 4px 1px 5px;
+  white-space: nowrap;
+}
+.feat-asi-inline select {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 0.7rem;
+  padding: 1px 3px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.feat-asi-inline select:focus { border-color: var(--accent); outline: none; }
 .feat-prereq {
   font-size: 0.72rem;
   color: var(--text-faint);

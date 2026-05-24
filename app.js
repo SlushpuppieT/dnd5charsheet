@@ -102,7 +102,7 @@ function blankCharacter() {
     subclassSkillPicked: false, // whether the pick modal has been shown for current subclass
     subclassFixedSkills: [], // auto-granted subclass skill keys (e.g. ['stealth'])
 
-    feats: [],              // [{ name, slug, source, custom, desc, prerequisite, asiChoice:{} }]
+    feats: [],              // [{ name, slug, source, custom, desc, prerequisite, asiChoice:{}, fixedAsi:{}, asiChoiceOptions:[], asiChoices:[], speedBonus:0, initiativeBonus:0 }]
     raceFeatSlot: false,    // Variant Human (or similar) grants one free feat
     raceSkillCount: 0,      // race-granted skill picks (modal-chosen)
     raceSkillOptions: 'any',
@@ -785,11 +785,13 @@ function renderPassive() {
 }
 
 // Sum auto initiative bonuses granted by feats the character has.
-// Known: "Alert" (+5, PHB 2014), "Improved Initiative" (+5, 5esrd).
-// Class features that grant init bonuses can be added manually with the +/-.
+// New feats store f.initiativeBonus from parseFeatEffects; legacy feats fall
+// back to a name-based lookup for the two most common PHB feats.
 function autoInitiativeBonus() {
   let bonus = 0;
   (character.feats || []).forEach(f => {
+    if (f.initiativeBonus) { bonus += Number(f.initiativeBonus); return; }
+    // Legacy fallback
     const n = (f.name || '').toLowerCase().trim();
     if (n === 'alert')               bonus += 5;
     if (n === 'improved initiative') bonus += 5;
@@ -4941,8 +4943,9 @@ async function loadPresets() {
   // Retroactively repair existing character feats:
   //   1. If their desc only contains the short blurb (saved before we combined
   //      `effects_desc` into the stored description), refresh it from SRD.
-  //   2. If their asiChoice is empty (older parser missed A5E-style wording),
-  //      re-parse and apply the fixed ASI bumps.
+  //   2. If their fixedAsi/asiChoiceOptions/speedBonus/initiativeBonus fields are
+  //      absent (saved before the inline-select update), re-parse and back-fill them.
+  //   3. Legacy: if asiChoice is empty (older parser missed A5E wording), apply fixed.
   let repaired = 0;
   (character.feats || []).forEach(cf => {
     if (cf.custom || !cf.slug) return;
@@ -4953,8 +4956,32 @@ async function loadPresets() {
     const fullDesc = buildFeatDesc(srd);
     if (fullDesc && cf.desc !== fullDesc) cf.desc = fullDesc;
 
-    // Repair ASI if missing
-    if (Object.keys(cf.asiChoice || {}).length === 0) {
+    // Back-fill new fields added by the inline-select update
+    if (cf.fixedAsi === undefined) {
+      const { fixed, choices, speedBonus, initiativeBonus } = parseFeatEffects(srd);
+      cf.fixedAsi          = { ...fixed };
+      cf.asiChoiceOptions  = choices;
+      // Preserve any existing user choices encoded in the old asiChoice
+      if (!cf.asiChoices) {
+        // Map old asiChoice minus fixedAsi into per-slot choices array
+        const oldExtra = { ...(cf.asiChoice || {}) };
+        Object.keys(fixed).forEach(k => {
+          oldExtra[k] = Math.max(0, (oldExtra[k] || 0) - (fixed[k] || 0));
+          if (oldExtra[k] === 0) delete oldExtra[k];
+        });
+        // Distribute leftover old values across choice slots
+        const leftover = Object.entries(oldExtra).flatMap(([k, v]) => Array(v).fill(k));
+        cf.asiChoices = choices.map((_, i) => leftover[i] || '');
+      }
+      if (!cf.speedBonus)       cf.speedBonus       = speedBonus;
+      if (!cf.initiativeBonus)  cf.initiativeBonus  = initiativeBonus;
+      // Recompute asiChoice from fixedAsi + asiChoices
+      recomputeFeatAsiChoice(cf);
+      repaired++;
+    }
+
+    // Legacy repair: asiChoice empty and no fixedAsi (pre-parseFeatEffects era)
+    if (!repaired && Object.keys(cf.asiChoice || {}).length === 0) {
       const { fixed } = parseFeatEffects(srd);
       if (Object.keys(fixed).length) {
         cf.asiChoice = { ...fixed };
@@ -5602,7 +5629,7 @@ function applyRace(value) {
   const speedWalk = (sub && sub.speed && sub.speed.walk) || (r.speed && r.speed.walk) || 0;
   if (speedWalk) {
     character.baseSpeed = speedWalk;
-    character.speed     = speedWalk;
+    character.speed     = speedWalk + sumFeatSpeedBonuses();
   }
 
   // Parse and apply racial ASI bonuses
@@ -6359,55 +6386,131 @@ function wireResourcePools() {
 // ====================================================================
 // Feats
 // ====================================================================
+
+/** Recompute f.asiChoice from f.fixedAsi plus any inline user picks (f.asiChoices). */
+function recomputeFeatAsiChoice(f) {
+  const result = { ...(f.fixedAsi || {}) };
+  (f.asiChoices || []).forEach(k => {
+    if (k) result[k] = (result[k] || 0) + 1;
+  });
+  f.asiChoice = result;
+}
+
 function parseFeatEffects(feat) {
   const fixed = {};
-  let choiceCount = 0;
+  const choices = [];   // array of option arrays, one per choice slot
+  let speedBonus = 0;
+  let initiativeBonus = 0;
 
   // Match: "(Increase|Raise|Boost) your X (score|attribute) by N"
   //        Open5e SRD uses "Increase ... score", A5E uses "Raise ... attribute".
   const VERB = '(?:increase|raise|boost)';
   const NOUN = '(?:score|attribute)';
+  const ANY_ABILITY = ['str','dex','con','int','wis','cha'];
 
-  function scanLine(line) {
-    const l = String(line);
-    // Choice: "Increase/Raise your X or Y score/attribute by N"
-    let m = l.match(new RegExp(`${VERB}\\s+your\\s+(\\w+)\\s+or\\s+(\\w+)\\s+${NOUN}\\s+by\\s+(\\d+)`, 'i'));
-    if (m) { choiceCount++; return true; }
-    // Fixed: "Increase/Raise your X score/attribute by N"
+  function scanLine(rawLine) {
+    // Strip A5E markdown bullets (* at line start) and emphasis markers
+    const l = String(rawLine).replace(/^\s*\*\s*/, '').replace(/\*/g, '');
+
+    // ── Speed bonus: constrain to single sentence (no greedy span) ──────────
+    // "Your Speed increases by N feet" / "speed is increased by N"
+    let m = l.match(/\bspeed\b[^.!?]*?\bincreases?\s+by\s+(\d+)\s*feet/i)
+           || l.match(/\bspeed\b[^.!?]*?\bincreased?\s+by\s+(\d+)\s*feet/i);
+    if (m) { speedBonus += Number(m[1]); return true; }
+    // "movement … increased by N feet"
+    m = l.match(/\bmovement\b[^.!?]*?\bincreased?\s+by\s+(\d+)\s*feet/i);
+    if (m) { speedBonus += Number(m[1]); return true; }
+
+    // ── Initiative bonus ─────────────────────────────────────────────────────
+    if (/\binitiative\b/i.test(l)) {
+      const im = l.match(/\+(\d+)\s+bonus/i) || l.match(/gain\s+(?:a\s+)?\+(\d+)/i);
+      if (im) { initiativeBonus += Number(im[1]); return true; }
+    }
+
+    // ── ASI: Choice (X or Y) ──────────────────────────────────────────────────
+    m = l.match(new RegExp(`${VERB}\\s+your\\s+(\\w+)\\s+or\\s+(\\w+)\\s+${NOUN}\\s+by\\s+(\\d+)`, 'i'));
+    if (m) {
+      const k1 = findAbilityKey(m[1]);
+      const k2 = findAbilityKey(m[2]);
+      // Each +1 from a "by N" that is an X-or-Y counts as one choice slot
+      const count = Number(m[3]) || 1;
+      const opts = (k1 && k2) ? [k1, k2] : ANY_ABILITY;
+      for (let i = 0; i < count; i++) choices.push(opts);
+      return true;
+    }
+
+    // ── ASI: Fixed named ability ──────────────────────────────────────────────
     m = l.match(new RegExp(`${VERB}\\s+your\\s+(\\w+(?:\\s+\\w+)?)\\s+${NOUN}\\s+by\\s+(\\d+)`, 'i'));
     if (m) {
       const key = findAbilityKey(m[1]);
-      if (key) fixed[key] = (fixed[key] || 0) + Number(m[2]);
-      else choiceCount++;
+      const val = Number(m[2]) || 1;
+      if (key) {
+        fixed[key] = (fixed[key] || 0) + val;
+      } else {
+        // Couldn't resolve the ability name → treat as free choice
+        for (let i = 0; i < val; i++) choices.push(ANY_ABILITY);
+      }
       return true;
     }
-    // Passive: "Your X score/attribute increases by N"
-    m = l.match(new RegExp(`your\\s+(\\w+(?:\\s+\\w+)?)\\s+${NOUN}\\s+increases\\s+by\\s+(\\d+)`, 'i'));
+
+    // ── ASI: Passive ("Your X score increases by N") ─────────────────────────
+    m = l.match(new RegExp(`your\\s+(\\w+(?:\\s+\\w+)?)\\s+${NOUN}\\s+increases?\\s+by\\s+(\\d+)`, 'i'));
     if (m) {
       const key = findAbilityKey(m[1]);
-      if (key) fixed[key] = (fixed[key] || 0) + Number(m[2]);
+      const val = Number(m[2]) || 1;
+      if (key) fixed[key] = (fixed[key] || 0) + val;
       return true;
     }
-    // "Increase one ability score of your choice by N"
-    m = l.match(/(?:increase|raise) one ability (?:score|attribute).*?by (\d+)/i);
-    if (m) { choiceCount += Number(m[1]) || 1; return true; }
-    // Generic choice pattern
-    if (/(?:increase|raise).*(?:ability score|attribute).*choice/i.test(l)) {
+
+    // ── ASI: "Increase one ability score of your choice by N" ────────────────
+    m = l.match(/(?:increase|raise) one ability (?:score|attribute)[^.]*?by (\d+)/i);
+    if (m) {
+      const count = Number(m[1]) || 1;
+      for (let i = 0; i < count; i++) choices.push(ANY_ABILITY);
+      return true;
+    }
+
+    // ── ASI: Generic choice pattern ───────────────────────────────────────────
+    if (/(?:increase|raise)[^.]*(?:ability score|attribute)[^.]*choice/i.test(l)) {
       const n = l.match(/by (\d+)/i);
-      choiceCount += n ? Number(n[1]) : 1;
+      const count = n ? Number(n[1]) : 1;
+      for (let i = 0; i < count; i++) choices.push(ANY_ABILITY);
       return true;
     }
+
     return false;
   }
 
   (feat.effects_desc || []).forEach(scanLine);
 
-  // Fall back to scanning desc if effects_desc didn't yield an ASI.
-  if (Object.keys(fixed).length === 0 && choiceCount === 0 && feat.desc) {
-    String(feat.desc).split(/(?<=[.!?])\s+/).forEach(scanLine);
+  // Fall back to scanning desc ONLY for ASI patterns (not speed/init — too many
+  // false positives in prose). Only scan if effects_desc yielded nothing at all.
+  if (Object.keys(fixed).length === 0 && choices.length === 0 && feat.desc) {
+    String(feat.desc).split(/(?<=[.!?])\s+/).forEach(line => {
+      const l = line.replace(/^\s*\*\s*/, '').replace(/\*/g, '');
+      let m = l.match(new RegExp(`${VERB}\\s+your\\s+(\\w+)\\s+or\\s+(\\w+)\\s+${NOUN}\\s+by\\s+(\\d+)`, 'i'));
+      if (m) {
+        const k1 = findAbilityKey(m[1]); const k2 = findAbilityKey(m[2]);
+        const count = Number(m[3]) || 1;
+        for (let i = 0; i < count; i++) choices.push((k1 && k2) ? [k1, k2] : ANY_ABILITY);
+        return;
+      }
+      m = l.match(new RegExp(`${VERB}\\s+your\\s+(\\w+(?:\\s+\\w+)?)\\s+${NOUN}\\s+by\\s+(\\d+)`, 'i'));
+      if (m) {
+        const key = findAbilityKey(m[1]);
+        const val = Number(m[2]) || 1;
+        if (key) fixed[key] = (fixed[key] || 0) + val;
+        else for (let i = 0; i < val; i++) choices.push(ANY_ABILITY);
+      }
+    });
   }
 
-  return { fixed, choiceCount };
+  return { fixed, choices, speedBonus, initiativeBonus };
+}
+
+/** Sum of walking speed bonuses granted by all currently-equipped feats. */
+function sumFeatSpeedBonuses() {
+  return (character.feats || []).reduce((sum, f) => sum + (Number(f.speedBonus) || 0), 0);
 }
 
 function buildFeatDesc(feat) {
@@ -6423,60 +6526,39 @@ function buildFeatDesc(feat) {
 
 function addFeatToCharacter(feat) {
   character.feats = character.feats || [];
-  const { fixed, choiceCount } = parseFeatEffects(feat);
+  const { fixed, choices, speedBonus, initiativeBonus } = parseFeatEffects(feat);
   const newFeat = {
-    name: feat.name,
-    slug: feat.slug || '',
-    source: feat.document__slug || '',
-    custom: false,
-    desc: buildFeatDesc(feat),
-    prerequisite: feat.prerequisite || '',
-    asiChoice: { ...fixed },
+    name:            feat.name,
+    slug:            feat.slug || '',
+    source:          feat.document__slug || '',
+    custom:          false,
+    desc:            buildFeatDesc(feat),
+    prerequisite:    feat.prerequisite || '',
+    // New: separate fixed vs user-chosen ASI
+    fixedAsi:        { ...fixed },
+    asiChoiceOptions: choices,            // [['str','dex'], ...] one array per slot
+    asiChoices:      choices.map(() => ''), // user selections, initially blank
+    asiChoice:       { ...fixed },        // combined total; updated as user picks
+    speedBonus,
+    initiativeBonus,
   };
   character.feats.push(newFeat);
-  const featIdx = character.feats.length - 1;
 
-  if (choiceCount > 0) {
-    openFeatASIModal(feat.name, choiceCount, featIdx);
-  } else {
-    renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
-    renderFeats();
-    persist();
-    const asiText = Object.entries(fixed).filter(([,v])=>v>0).map(([k,v])=>`+${v} ${k.toUpperCase()}`).join(', ');
-    toast(`Added feat: ${feat.name}${asiText ? ' (' + asiText + ')' : ''}`);
-  }
-}
+  // Apply speed bonus immediately (before renderFeats calls renderCombat)
+  if (speedBonus) character.speed = (character.speed || 0) + speedBonus;
 
-function openFeatASIModal(featName, count, featIdx) {
-  const abilOpts = ABILITIES.map(a => `<option value="${a.key}">${a.name}</option>`).join('');
-  const rows = Array.from({ length: count }, (_, i) => `
-    <div class="racial-asi-row">
-      <label>+1 to:</label>
-      <select class="feat-asi-sel" data-idx="${i}">
-        <option value="">— pick —</option>${abilOpts}
-      </select>
-    </div>
-  `).join('');
-  showModal({
-    title: `${featName}: choose ability increase`,
-    bodyHTML: `<div class="racial-asi-wrap">${rows}</div>`,
-    confirmText: 'Apply',
-    onConfirm: () => {
-      const picks = $$('#modal-body .feat-asi-sel');
-      if (picks.some(s => !s.value)) { toast('Pick an ability score'); return false; }
-      const f = character.feats[featIdx];
-      if (!f) return true;
-      picks.forEach(s => {
-        const k = s.value;
-        f.asiChoice[k] = (f.asiChoice[k] || 0) + 1;
-      });
-      renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
-      renderFeats();
-      persist();
-      toast(`Added feat: ${f.name} (+ASI)`);
-      return true;
-    }
-  });
+  renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
+  renderFeats();
+  persist();
+
+  const fixedText  = Object.entries(fixed).filter(([,v])=>v>0).map(([k,v])=>`+${v} ${k.toUpperCase()}`).join(', ');
+  const extraNotes = [
+    fixedText,
+    choices.length > 0 ? `${choices.length} choice${choices.length > 1 ? 's' : ''} to pick` : '',
+    speedBonus       ? `speed +${speedBonus}ft` : '',
+    initiativeBonus  ? `initiative +${initiativeBonus}` : '',
+  ].filter(Boolean).join(', ');
+  toast(`Added feat: ${feat.name}${extraNotes ? ' (' + extraNotes + ')' : ''}`);
 }
 
 function renderFeats() {
@@ -6520,30 +6602,74 @@ function renderFeats() {
     return;
   }
   feats.forEach((f, i) => {
-    const asiText = Object.entries(f.asiChoice || {})
-      .filter(([, v]) => v > 0)
-      .map(([k, v]) => `+${v} ${k.toUpperCase()}`).join(', ');
     const srcTag = f.custom
       ? '<span class="feature-sub-tag">Custom</span>'
       : (f.source && f.source !== 'wotc-srd' ? `<span class="feature-sub-tag">${escapeHTML(sourceTag(f.source))}</span>` : '');
+
+    // ── Fixed ASI badge (from parseFeatEffects, or legacy asiChoice fallback) ───
+    // fixedAsi is set by migration when SRD data loads. For feats loaded offline
+    // before migration can run, fall back to the combined asiChoice for display.
+    const fixedAsi   = f.fixedAsi !== undefined ? f.fixedAsi : (f.asiChoice || {});
+    const fixedText  = Object.entries(fixedAsi).filter(([,v])=>v>0)
+                         .map(([k,v])=>`+${v} ${k.toUpperCase()}`).join(', ');
+
+    // ── Inline choice selects (one per undecided slot) ────────────────────────
+    const choiceOpts = f.asiChoiceOptions || [];   // [['str','dex'], ...]
+    const choiceVals = f.asiChoices        || [];   // ['str', '']
+    // Build a <select> for each choice slot
+    const selects = choiceOpts.map((opts, si) => {
+      const curVal = choiceVals[si] || '';
+      const optHTML = ABILITIES
+        .filter(a => opts.length === 0 || opts.includes(a.key))
+        .map(a => `<option value="${a.key}"${a.key === curVal ? ' selected' : ''}>${a.name.slice(0,3).toUpperCase()}</option>`)
+        .join('');
+      return `<span class="feat-asi-inline">+1 <select class="feat-asi-sel" data-feat="${i}" data-slot="${si}"><option value="">—</option>${optHTML}</select></span>`;
+    });
+
     const el = document.createElement('div');
     el.className = 'feat-entry';
     el.innerHTML = `
       <div class="feat-row">
         <span class="feat-name">${escapeHTML(f.name)}${srcTag}</span>
-        ${asiText ? `<span class="feat-asi">${asiText}</span>` : ''}
+        ${fixedText ? `<span class="feat-asi">${fixedText}</span>` : ''}
+        ${selects.join('')}
         <button class="icon-btn" data-feat-del="${i}" title="Remove feat">&times;</button>
       </div>
       ${f.prerequisite ? `<div class="feat-prereq">Req: ${escapeHTML(f.prerequisite)}</div>` : ''}
       ${f.desc ? `<div class="feat-desc">${escapeHTML(f.desc)}</div>` : ''}
     `;
     el.querySelector('.feat-name').addEventListener('click', () => el.classList.toggle('expanded'));
+
+    // Wire inline ASI selects
+    el.querySelectorAll('.feat-asi-sel').forEach(sel => {
+      sel.addEventListener('change', e => {
+        e.stopPropagation();
+        const fi   = Number(sel.dataset.feat);
+        const slot = Number(sel.dataset.slot);
+        const feat = character.feats[fi];
+        if (!feat) return;
+        feat.asiChoices        = feat.asiChoices || (feat.asiChoiceOptions || []).map(() => '');
+        feat.asiChoices[slot]  = sel.value;
+        recomputeFeatAsiChoice(feat);
+        // Recompute ability scores, combat, etc.
+        renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
+        persist();
+      });
+    });
+
     list.appendChild(el);
   });
+
   list.querySelectorAll('[data-feat-del]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      character.feats.splice(Number(btn.dataset.featDel), 1);
+      const idx = Number(btn.dataset.featDel);
+      const removed = character.feats[idx];
+      // Subtract feat's speed bonus before removing
+      if (removed && removed.speedBonus) {
+        character.speed = Math.max(0, (character.speed || 0) - Number(removed.speedBonus));
+      }
+      character.feats.splice(idx, 1);
       renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
       renderFeats(); persist();
     });
