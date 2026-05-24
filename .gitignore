@@ -16,3 +16,5 @@ PROJECT.md
 # OS junk
 .DS_Store
 Thumbs.db
+git.key
+git.key.pub

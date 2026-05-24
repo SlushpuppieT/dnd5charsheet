@@ -2698,4 +2698,20 @@ input.hb-deviation {
     height: 26px;
     font-size: 0.85rem;
   }
+
+  /* ── HP delta stepper (damage/heal amount): shrink font so "amount"
+     placeholder fits between the ± buttons on narrow screens ─────────── */
+  .hp-delta-stepper .stepper-input {
+    font-size: 0.85rem;
+  }
+
+  /* ── Info overlay markup table: allow the link-syntax row to wrap ──────
+     white-space: nowrap keeps the table tidy on desktop, but on mobile
+     the [link text](https://example.com) cell overflows the overlay.
+     Switching to normal lets the <wbr> hint in the HTML break it right
+     at the ]( boundary: [link text]  ↵  (https://example.com)
+     ─────────────────────────────────────────────────────────────────── */
+  .info-md-table td:first-child {
+    white-space: normal;
+  }
 }
