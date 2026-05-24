@@ -877,28 +877,32 @@ input.locked {
   margin-bottom: 10px;
 }
 
-/* Cantrips / Spells: grouped Known + Bonus rows */
+/* Cantrips / Spells: two side-by-side panels (desktop) */
 .spell-counts {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  gap: 8px;
   margin-bottom: 12px;
   padding: 8px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+/* Each row is now a self-contained panel for one spell type */
 .spell-count-row {
+  flex: 1;
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg-0);
+  border-radius: 4px;
 }
 .spell-count-title {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   color: var(--text-dim);
-  flex: 0 0 70px;
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -938,6 +942,7 @@ input.locked {
   display: flex;
   gap: 12px;
   flex: 1;
+  justify-content: center;
 }
 .spell-count-field {
   display: flex;
@@ -2716,6 +2721,9 @@ input.hb-deviation {
 
   /* ── Spell table: scroll horizontally if needed ── */
   .spell-list-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* ── Spell counts: stack Cantrips / Spells panels vertically on mobile ── */
+  .spell-counts { flex-direction: column; }
 
   /* ── HP grid: equal columns ── */
   .hp-grid { grid-template-columns: repeat(3, 1fr); }
