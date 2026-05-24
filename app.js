@@ -5512,7 +5512,9 @@ function applyRace(value) {
   if (r.traits) appendAutoText('features', 'race', `--- ${r.name} traits ---\n${stripMarkdown(r.traits)}\n---`);
   if (sub && sub.traits) appendAutoText('features', 'race', `--- ${sub.name} traits ---\n${stripMarkdown(sub.traits)}\n---`);
   if (r.languages) appendAutoText('proficiencies', 'race', stripMarkdown(r.languages));
-  if (r.asi_desc) appendAutoText('features', 'race', `${stripMarkdown(r.asi_desc)}\n---`);
+  // Skip the base race's ASI description when the subrace replaces it entirely
+  // (e.g. Variant Human replaces "+1 to all six scores" with its own wording).
+  if (r.asi_desc && !(sub && sub.replacesBaseAsi)) appendAutoText('features', 'race', `${stripMarkdown(r.asi_desc)}\n---`);
   if (sub && sub.asi_desc) appendAutoText('features', 'race', `${stripMarkdown(sub.asi_desc)}\n---`);
 
   renderAll();
