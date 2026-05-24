@@ -5286,7 +5286,10 @@ function onPresetChange(e) {
     if (which === 'class') {
       character.subclassSlug = '';
       character.subclass = '';
+      character.spellAbility = '';   // reset; user can pick manually for their custom class
       renderClassFeatures();
+      renderSpellcasting();          // unlocks auto-filled fields
+      applyBindingsToInputs();       // syncs the Ability dropdown back to —
     }
     if (which === 'background') applyCustomBackground();
     const input = sel.parentElement.querySelector('input[type="text"]');
@@ -5558,6 +5561,7 @@ function clearClass() {
   character.classSkillCount = 0;
   character.classSkillOptions = 'any';
   character.cachedClass = null;
+  character.spellAbility = '';   // clear ability that was auto-set by the old class
   applyClassPools('');
   renderAll();
   persist();
@@ -5630,6 +5634,7 @@ function applyClass(slug) {
     character.classSkillOptions = 'any';
     character.subclassSlug = '';
     character.subclass = '';
+    character.spellAbility = '';   // clear old class's ability; new class will set it if applicable
   }
   character.class = c.name;
   character.classSlug = c.slug;
