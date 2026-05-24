@@ -950,6 +950,17 @@ input.locked {
   text-align: center;
   font-weight: 600;
 }
+/* Keep the compact look when the input is wrapped in a stepper-row — the
+   generic .stepper-input rule would otherwise pump the font up to 1.3rem. */
+.spell-count-field .stepper-row .stepper-input {
+  flex: 0 0 50px;
+  width: 50px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: inherit;
+}
+/* Hide the +/- stack when the field is locked (auto-computed from class). */
+.spell-count-field .stepper-input.locked + .stepper-stack { display: none; }
 /* Locked = auto-set from class table. Drop the spinner so the cell looks like a readout.
    When the class is swapped to Custom, the locked class is removed and the spinner returns. */
 .spell-count-field input[type="number"].locked {

@@ -2072,6 +2072,7 @@ function pickPreset(preset, slug) {
     if (preset === 'background') applyCustomBackground();
     const input = $(`input[data-bind="${preset}"]`);
     if (input) { input.focus(); input.select?.(); }
+    syncPresetDropdown(preset);
     persist();
   } else {
     if (preset === 'class')           applyClass(slug);
@@ -2088,19 +2089,26 @@ function syncPresetDropdown(preset) {
 
   const slug    = character[preset + 'Slug'] || '';
   const valueEl = dd.querySelector('.preset-dd-value');
+  // Custom mode = no slug, but the user has either typed a name or just picked Custom…
+  // The .custom-mode class on the field is the canonical signal (set by setCustomMode).
+  const field      = $(`select[data-preset="${preset}"]`)?.closest('.srd-field');
+  const NAME_FIELD = { class: 'class', race: 'race', background: 'background' };
+  const savedName  = String(character[NAME_FIELD[preset]] || '').trim();
+  const isCustom   = !slug && (field?.classList.contains('custom-mode') || !!savedName);
 
-  panel?.querySelectorAll('.preset-dd-option')
-        .forEach(o => o.classList.toggle('active', !!slug && o.dataset.slug === slug));
+  panel?.querySelectorAll('.preset-dd-option').forEach(o => {
+    const isMatch = slug ? o.dataset.slug === slug
+                         : (isCustom && o.dataset.slug === '__custom__');
+    o.classList.toggle('active', isMatch);
+  });
 
-  if (!slug || slug === '__custom__') {
-    if (valueEl) valueEl.textContent = PRESET_PLACEHOLDER[preset];
+  if (!slug) {
+    if (valueEl) valueEl.textContent = isCustom ? 'Custom' : PRESET_PLACEHOLDER[preset];
     return;
   }
   const escapedSlug = slug.replace(/:/g, '\\:');   // CSS.escape colon for querySelector
   const opt = panel?.querySelector(`.preset-dd-option[data-slug="${escapedSlug}"]`);
   // Fallback chain: matched panel option → live cache name → saved display name → slug
-  const NAME_FIELD = { class: 'class', race: 'race', background: 'background' };
-  const savedName  = String(character[NAME_FIELD[preset]] || '').trim();
   if (valueEl) {
     valueEl.textContent = opt ? (opt.dataset.label || opt.textContent.trim())
                               : (getPresetItem(preset, slug)?.name || savedName || slug);
@@ -5550,13 +5558,7 @@ function clearAutoSource(source) {
 function clearClass() {
   clearAutoSource('class');
   clearSubclassSkillGrants();
-  const src = character.skillSources || {};
-  Object.keys(src).forEach(key => {
-    if (src[key] === 'class') {
-      if (character.skills[key]) character.skills[key].prof = false;
-      delete src[key];
-    }
-  });
+  clearSkillSourcesWhere(s => s === 'class');
   character.class = '';
   character.classSlug = '';
   character.subclass = '';
@@ -5573,13 +5575,7 @@ function clearClass() {
 
 function clearRace() {
   clearAutoSource('race');
-  const src = character.skillSources || {};
-  Object.keys(src).forEach(key => {
-    if (src[key] === 'race' || src[key] === 'race-pick' || src[key] === 'race-free') {
-      if (character.skills[key]) character.skills[key].prof = false;
-      delete src[key];
-    }
-  });
+  clearSkillSourcesWhere(s => s === 'race' || s === 'race-pick' || s === 'race-free');
   character.race = '';
   character.raceSlug = '';
   character.racialBonuses = {};
@@ -5598,13 +5594,7 @@ function clearRace() {
 
 function clearBackground() {
   clearAutoSource('background');
-  const src = character.skillSources || {};
-  Object.keys(src).forEach(key => {
-    if (src[key] === 'background' || src[key] === 'bg-pick' || src[key] === 'bg-free') {
-      if (character.skills[key]) character.skills[key].prof = false;
-      delete src[key];
-    }
-  });
+  clearSkillSourcesWhere(s => s === 'background' || s === 'bg-pick' || s === 'bg-free');
   character.background = '';
   character.backgroundSlug = '';
   character.bgSkillCount = 0;
@@ -5626,13 +5616,7 @@ function applyClass(slug) {
   if (character.classSlug !== c.slug) {
     clearAutoSource('class');
     clearSubclassSkillGrants();
-    const src = character.skillSources || {};
-    Object.keys(src).forEach(key => {
-      if (src[key] === 'class') {
-        if (character.skills[key]) character.skills[key].prof = false;
-        delete src[key];
-      }
-    });
+    clearSkillSourcesWhere(s => s === 'class');
     character.classSkillCount = 0;
     character.classSkillOptions = 'any';
     character.subclassSlug = '';
@@ -5739,14 +5723,26 @@ function reapplyOtherFixedGrants(exceptSource) {
   }
 }
 
-function clearSubclassSkillGrants() {
+/** Strip proficiency from skills whose source matches the predicate, then
+ *  delete those source entries. Expertise (×2) can't outlive its proficiency,
+ *  so any cleared skill also loses exp + its slot in expertiseOrder. */
+function clearSkillSourcesWhere(matches) {
   const src = character.skillSources || {};
   Object.keys(src).forEach(key => {
-    if (src[key] === 'subclass' || src[key] === 'subclass-pick' || src[key] === 'subclass-free') {
-      if (character.skills[key]) character.skills[key].prof = false;
-      delete src[key];
+    if (!matches(src[key])) return;
+    const sk = character.skills[key];
+    if (sk) {
+      sk.prof = false;
+      sk.exp  = false;
     }
+    delete src[key];
   });
+  character.expertiseOrder = (character.expertiseOrder || [])
+    .filter(k => character.skills[k]?.exp);
+}
+
+function clearSubclassSkillGrants() {
+  clearSkillSourcesWhere(s => s === 'subclass' || s === 'subclass-pick' || s === 'subclass-free');
   character.subclassSkillCount   = 0;
   character.subclassSkillOptions = 'any';
   character.subclassSkillPicked  = false;
@@ -5763,13 +5759,7 @@ function applyRace(value) {
   // Clear previous race's auto-added text and skill sources before applying the new one
   if (character.raceSlug !== value) {
     clearAutoSource('race');
-    const src = character.skillSources || {};
-    Object.keys(src).forEach(key => {
-      if (src[key] === 'race' || src[key] === 'race-pick' || src[key] === 'race-free') {
-        if (character.skills[key]) character.skills[key].prof = false;
-        delete src[key];
-      }
-    });
+    clearSkillSourcesWhere(s => s === 'race' || s === 'race-pick' || s === 'race-free');
     character.raceSkillCount   = 0;
     character.raceSkillOptions = 'any';
     character.raceFixedSkills  = [];
@@ -5943,13 +5933,7 @@ function applyBackground(slug) {
   // Clear old background skill grants and auto-text when switching backgrounds
   if (character.backgroundSlug !== b.slug) {
     clearAutoSource('background');
-    const src = character.skillSources || {};
-    Object.keys(src).forEach(key => {
-      if (src[key] === 'background' || src[key] === 'bg-pick' || src[key] === 'bg-free') {
-        if (character.skills[key]) character.skills[key].prof = false;
-        delete src[key];
-      }
-    });
+    clearSkillSourcesWhere(s => s === 'background' || s === 'bg-pick' || s === 'bg-free');
     character.bgSkillCount = 0;
     character.bgFixedCount = 0;
     character.bgSkillOptions = 'any';
@@ -6028,13 +6012,7 @@ function applyCustomBackground() {
 
   // Wipe any leftover skill grants from a prior (real) background.
   clearAutoSource('background');
-  const src = character.skillSources || {};
-  Object.keys(src).forEach(key => {
-    if (src[key] === 'background' || src[key] === 'bg-pick' || src[key] === 'bg-free') {
-      if (character.skills[key]) character.skills[key].prof = false;
-      delete src[key];
-    }
-  });
+  clearSkillSourcesWhere(s => s === 'background' || s === 'bg-pick' || s === 'bg-free');
 
   character.bgSkillCount   = 2;
   character.bgFixedCount   = 0;

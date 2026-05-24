@@ -405,11 +405,29 @@
             <div class="spell-count-title">Cantrips</div>
             <div class="spell-count-fields">
               <div class="spell-count-field">
-                <input type="number" data-bind="cantripsKnown" id="cantrips-known-input" min="0" max="30" value="0">
+                <div class="stepper-row stepper-row-stacked">
+                  <input type="number" data-bind="cantripsKnown" id="cantrips-known-input"
+                         min="0" max="30" value="0"
+                         class="stepper-input no-spinner"
+                         data-step-min="0" data-step-max="30">
+                  <div class="stepper-stack">
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="cantripsKnown" data-dir="1"  title="+1">+</button>
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="cantripsKnown" data-dir="-1" title="−1">&minus;</button>
+                  </div>
+                </div>
                 <label>Known</label>
               </div>
               <div class="spell-count-field">
-                <input type="number" data-bind="cantripsBonus" id="cantrips-bonus-input" min="0" max="30" value="0">
+                <div class="stepper-row stepper-row-stacked">
+                  <input type="number" data-bind="cantripsBonus" id="cantrips-bonus-input"
+                         min="0" max="30" value="0"
+                         class="stepper-input no-spinner"
+                         data-step-min="0" data-step-max="30">
+                  <div class="stepper-stack">
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="cantripsBonus" data-dir="1"  title="+1">+</button>
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="cantripsBonus" data-dir="-1" title="−1">&minus;</button>
+                  </div>
+                </div>
                 <label>Bonus</label>
               </div>
             </div>
@@ -421,11 +439,29 @@
             </div>
             <div class="spell-count-fields">
               <div class="spell-count-field">
-                <input type="number" data-bind="spellsKnown" id="spells-known-input" min="0" max="60" value="0">
+                <div class="stepper-row stepper-row-stacked">
+                  <input type="number" data-bind="spellsKnown" id="spells-known-input"
+                         min="0" max="60" value="0"
+                         class="stepper-input no-spinner"
+                         data-step-min="0" data-step-max="60">
+                  <div class="stepper-stack">
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="spellsKnown" data-dir="1"  title="+1">+</button>
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="spellsKnown" data-dir="-1" title="−1">&minus;</button>
+                  </div>
+                </div>
                 <label id="spells-known-label">Known</label>
               </div>
               <div class="spell-count-field">
-                <input type="number" data-bind="spellsBonus" id="spells-bonus-input" min="0" max="60" value="0">
+                <div class="stepper-row stepper-row-stacked">
+                  <input type="number" data-bind="spellsBonus" id="spells-bonus-input"
+                         min="0" max="60" value="0"
+                         class="stepper-input no-spinner"
+                         data-step-min="0" data-step-max="60">
+                  <div class="stepper-stack">
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="spellsBonus" data-dir="1"  title="+1">+</button>
+                    <button type="button" class="stepper-btn stepper-btn-mini" data-step-target="spellsBonus" data-dir="-1" title="−1">&minus;</button>
+                  </div>
+                </div>
                 <label>Bonus</label>
               </div>
             </div>
