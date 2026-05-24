@@ -6453,6 +6453,18 @@ function parseFeatEffects(feat) {
       return true;
     }
 
+    // ── ASI: Passive choice ("Your X or Y score increases by N") ────────────────
+    // e.g. Athletic: "Your Strength or Dexterity score increases by 1"
+    m = l.match(new RegExp(`your\\s+(\\w+)\\s+or\\s+(\\w+)\\s+${NOUN}\\s+increases?\\s+by\\s+(\\d+)`, 'i'));
+    if (m) {
+      const k1 = findAbilityKey(m[1]);
+      const k2 = findAbilityKey(m[2]);
+      const count = Number(m[3]) || 1;
+      const opts = (k1 && k2) ? [k1, k2] : ANY_ABILITY;
+      for (let i = 0; i < count; i++) choices.push(opts);
+      return true;
+    }
+
     // ── ASI: Passive ("Your X score increases by N") ─────────────────────────
     m = l.match(new RegExp(`your\\s+(\\w+(?:\\s+\\w+)?)\\s+${NOUN}\\s+increases?\\s+by\\s+(\\d+)`, 'i'));
     if (m) {
@@ -6488,6 +6500,7 @@ function parseFeatEffects(feat) {
   if (Object.keys(fixed).length === 0 && choices.length === 0 && feat.desc) {
     String(feat.desc).split(/(?<=[.!?])\s+/).forEach(line => {
       const l = line.replace(/^\s*\*\s*/, '').replace(/\*/g, '');
+      // Active-verb X-or-Y: "Raise your X or Y attribute by N"
       let m = l.match(new RegExp(`${VERB}\\s+your\\s+(\\w+)\\s+or\\s+(\\w+)\\s+${NOUN}\\s+by\\s+(\\d+)`, 'i'));
       if (m) {
         const k1 = findAbilityKey(m[1]); const k2 = findAbilityKey(m[2]);
@@ -6495,6 +6508,15 @@ function parseFeatEffects(feat) {
         for (let i = 0; i < count; i++) choices.push((k1 && k2) ? [k1, k2] : ANY_ABILITY);
         return;
       }
+      // Passive X-or-Y: "Your X or Y score increases by N"
+      m = l.match(new RegExp(`your\\s+(\\w+)\\s+or\\s+(\\w+)\\s+${NOUN}\\s+increases?\\s+by\\s+(\\d+)`, 'i'));
+      if (m) {
+        const k1 = findAbilityKey(m[1]); const k2 = findAbilityKey(m[2]);
+        const count = Number(m[3]) || 1;
+        for (let i = 0; i < count; i++) choices.push((k1 && k2) ? [k1, k2] : ANY_ABILITY);
+        return;
+      }
+      // Active-verb fixed: "Increase your X attribute by N"
       m = l.match(new RegExp(`${VERB}\\s+your\\s+(\\w+(?:\\s+\\w+)?)\\s+${NOUN}\\s+by\\s+(\\d+)`, 'i'));
       if (m) {
         const key = findAbilityKey(m[1]);
