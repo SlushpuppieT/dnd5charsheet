@@ -64,6 +64,7 @@ function blankCharacter() {
     armorSlot: null,         // { kind: 'armor'|'magic-armor', slug, source, name, raw } | null
     armorEnhancement: 0,     // +N magic enhancement on the equipped armor (0–10, e.g. "Leather +1")
     shieldSlot: null,        // { kind: 'shield', slug, source, name, raw } | null  — flat AC bonus
+    shieldEnhancement: 0,    // +N magic enhancement on the equipped shield (0–10, e.g. "Shield +1")
     magicArmor1: null,       // { slug, source, name, acBonus, raw } | null  — flat-bonus AC item
     magicArmor2: null,       // same shape as magicArmor1
     speed: 30,
@@ -818,6 +819,7 @@ function autoInitiativeBonus() {
  *  A safety clamp keeps things sane regardless of API quirks. */
 function shieldBonus(slot) {
   if (!slot) return 0;
+  if (slot.kind === 'custom-shield') return Math.max(0, Math.min(10, Number(slot.customBonus) || 0));
   const r = slot.raw || {};
   const flat = Number(r.plus_flat_mod) || 0;
   const base = Number(r.base_ac)        || 0;
@@ -829,6 +831,7 @@ function shieldBonus(slot) {
 /** Compute the AC contribution of an armor or armor-replacement slot. */
 function armorSlotAC(slot, dex) {
   if (!slot) return 10 + dex;
+  if (slot.kind === 'custom-armor') return Number(slot.customAC) || 10;
   if (slot.kind === 'magic-armor') {
     // Parsed magic-armor formula: { base, addDex, maxDex }
     const f = slot.formula || {};
@@ -853,6 +856,7 @@ function computeArmorAC() {
   // Magic armor enhancement (e.g. "Leather +1") applies only when armor is equipped.
   if (character.armorSlot) total += clampArmorEnhancement(character.armorEnhancement);
   total += shieldBonus(character.shieldSlot);
+  if (character.shieldSlot) total += clampArmorEnhancement(character.shieldEnhancement);
   for (const slot of [character.magicArmor1, character.magicArmor2]) {
     if (slot && slot.acBonus) total += Number(slot.acBonus) || 0;
   }
@@ -887,7 +891,11 @@ function applyACDeviation() {
   } else {
     parts.push('Unarmored');
   }
-  if (character.shieldSlot) parts.push(`${character.shieldSlot.name} (${fmtMod(shieldBonus(character.shieldSlot))})`);
+  if (character.shieldSlot) {
+    const senh = clampArmorEnhancement(character.shieldEnhancement);
+    const stot = shieldBonus(character.shieldSlot) + senh;
+    parts.push(`${character.shieldSlot.name}${senh > 0 ? ` +${senh}` : ''} (${fmtMod(stot)})`);
+  }
   for (const s of [character.magicArmor1, character.magicArmor2]) {
     if (s) parts.push(`${s.name} (${fmtMod(Number(s.acBonus) || 0)})`);
   }
@@ -2103,6 +2111,13 @@ const ARMOR_SLOT_PLACEHOLDER = {
 };
 let _openArmorSlot = null;
 
+/** Returns a fresh default custom-item object for the given armor slot. */
+function makeCustomArmorItem(slotKey) {
+  if (slotKey === 'armorSlot')  return { kind: 'custom-armor',  slug: '__custom__', name: 'Custom Armor',  customAC: 10,   raw: {} };
+  if (slotKey === 'shieldSlot') return { kind: 'custom-shield', slug: '__custom__', name: 'Custom Shield', customBonus: 2, raw: {} };
+  return { kind: 'custom-flat', slug: '__custom__', name: 'Custom Item', acBonus: 0, raw: {} };
+}
+
 function buildArmorDropdowns() {
   ARMOR_SLOTS.forEach(slotKey => {
     const host = $(`.armor-slot-field[data-slot="${slotKey}"]`);
@@ -2128,6 +2143,29 @@ function buildArmorDropdowns() {
     dd.appendChild(clr);
 
     host.appendChild(dd);
+
+    // ── Custom value sub-row (shown when a custom item is equipped) ────────
+    const [cLabel, cField, cDefault] =
+      slotKey === 'armorSlot'  ? ['AC',    'customAC',    10] :
+      slotKey === 'shieldSlot' ? ['AC +',  'customBonus',  2] :
+                                 ['Bonus', 'acBonus',       0];
+    const customSub = document.createElement('div');
+    customSub.className = 'armor-custom-sub';
+    customSub.id = `armor-custom-sub-${slotKey}`;
+    customSub.style.display = 'none';
+    customSub.innerHTML =
+      `<span class="armor-custom-label">${cLabel}:</span>` +
+      `<input type="number" class="armor-custom-inp" min="0" max="30" value="${cDefault}">`;
+    customSub.querySelector('input').addEventListener('input', e => {
+      const slot = character[slotKey];
+      if (!slot || slot.slug !== '__custom__') return;
+      slot[cField] = Math.max(0, Number(e.target.value) || 0);
+      applyArmorAC();
+      syncArmorDropdown(slotKey);
+      persist();
+    });
+    host.appendChild(customSub);
+    // ──────────────────────────────────────────────────────────────────────
 
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -2338,6 +2376,13 @@ function populateArmorDropdown(slotKey) {
     });
   }
 
+  // ── Custom entry (always at the bottom of every slot) ─────────────────
+  const customSep = document.createElement('div');
+  customSep.className = 'preset-dd-sep';
+  customSep.textContent = '── Custom ──';
+  list.appendChild(customSep);
+  list.appendChild(makeArmorDdOption(slotKey, makeCustomArmorItem(slotKey), '+ Custom…'));
+
   syncArmorDropdown(slotKey);
 }
 
@@ -2390,6 +2435,13 @@ function makeArmorDdOption(slotKey, item, label) {
 }
 
 function pickArmorSlot(slotKey, item) {
+  // When selecting custom, preserve any numeric value the user already typed
+  if (item && item.slug === '__custom__') {
+    const prev = character[slotKey];
+    if (prev && prev.slug === '__custom__') {
+      item = { ...item, ...prev };   // keep customAC / customBonus / acBonus
+    }
+  }
   character[slotKey] = item;
   // Note: we intentionally preserve `acOverride` across armor changes so that
   // any homebrew/class-feature bonus (e.g. Monk unarmored defense) persists.
@@ -2420,8 +2472,26 @@ function syncArmorDropdown(slotKey) {
       const enh = clampArmorEnhancement(character.armorEnhancement);
       if (enh > 0) label += ` +${enh}`;
     }
+    if (slotKey === 'shieldSlot') {
+      const enh = clampArmorEnhancement(character.shieldEnhancement);
+      if (enh > 0) label += ` +${enh}`;
+    }
     if (valueEl) valueEl.textContent = label;
     if (clearEl) clearEl.style.display = '';
+  }
+
+  // ── Show / hide / update the custom value sub-row ─────────────────────
+  const customSub = $(`#armor-custom-sub-${slotKey}`);
+  if (customSub) {
+    const isCustom = !!(cur && cur.slug === '__custom__');
+    customSub.style.display = isCustom ? '' : 'none';
+    if (isCustom) {
+      const inp = customSub.querySelector('input');
+      if (inp && document.activeElement !== inp) {
+        const field = slotKey === 'armorSlot' ? 'customAC' : slotKey === 'shieldSlot' ? 'customBonus' : 'acBonus';
+        inp.value = cur[field] ?? 0;
+      }
+    }
   }
 }
 
@@ -2431,6 +2501,7 @@ function syncArmorDropdowns() {
 
 function renderArmorHoverContent(item) {
   if (!item) return '';
+  if (item.slug === '__custom__') return '';  // custom items use the inline input, no hover card
   const r = item.raw || {};
   const lines = [];
   if (item.kind === 'armor') {
@@ -2474,6 +2545,7 @@ function armorOpen5eUrl(item) {
 
 function openArmorPopup(slotKey, item) {
   if (!item) return;
+  if (item.slug === '__custom__') return;  // custom items use the inline input, no popup
   $('#preset-popup-title').textContent = item.name;
   const content = $('#preset-popup-content');
   content.innerHTML = renderArmorPopupContent(slotKey, item);
@@ -2758,6 +2830,33 @@ function applyArmorEnhancementDisplay() {
   valEl.textContent = `+${n}`;
 }
 
+// Wire the +/− buttons that step character.shieldEnhancement (0–10).
+function wireShieldEnhancement() {
+  const valEl = $('#shield-enhance-val');
+  const dn    = $('#shield-enhance-dn');
+  const up    = $('#shield-enhance-up');
+  if (!valEl || !dn || !up) return;
+  const stepBy = delta => {
+    const next = clampArmorEnhancement((Number(character.shieldEnhancement) || 0) + delta);
+    if (next === character.shieldEnhancement) return;
+    character.shieldEnhancement = next;
+    applyShieldEnhancementDisplay();
+    syncArmorDropdown('shieldSlot');
+    applyArmorAC();
+    persist();
+  };
+  dn.addEventListener('click', () => stepBy(-1));
+  up.addEventListener('click', () => stepBy( 1));
+}
+
+/** Refresh the "+N" readout next to the shield slot from character state. */
+function applyShieldEnhancementDisplay() {
+  const valEl = $('#shield-enhance-val');
+  if (!valEl) return;
+  const n = clampArmorEnhancement(character.shieldEnhancement);
+  valEl.textContent = `+${n}`;
+}
+
 // Wire the AC input's right-click reset (override → 0). The +/- buttons and
 // typed values are handled by the generic stepper + the data-bind handler.
 function wireAC() {
@@ -2941,6 +3040,7 @@ function renderAll() {
   applyHitDieDeviation();
   applySpeedDeviation();
   applyArmorEnhancementDisplay();
+  applyShieldEnhancementDisplay();
   applyArmorAC();
   syncArmorDropdowns();
   syncPresetSelections();
@@ -6950,6 +7050,7 @@ function boot() {
   wireAC();
   wireHPMax();
   wireArmorEnhancement();
+  wireShieldEnhancement();
   wireMarkupToggles();
   wireInfoButton();
   wireThemeSelector();

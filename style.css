@@ -822,6 +822,37 @@ input.locked {
 }
 .armor-dd-clear:hover { color: var(--danger); border-color: var(--danger); }
 
+/* Custom value sub-row (appears under the dropdown when a custom item is equipped) */
+.armor-custom-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.armor-custom-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.armor-custom-inp {
+  width: 60px;
+  padding: 3px 6px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.armor-custom-inp::-webkit-outer-spin-button,
+.armor-custom-inp::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.armor-custom-inp:focus { border-color: var(--accent); outline: none; }
+
 /* ===== Spellcasting ===== */
 .spell-header {
   display: grid;
@@ -2715,6 +2746,32 @@ input.hb-deviation {
     min-width: 0;
     min-height: 32px;
     width: 100%;
+  }
+
+  /* ── Armor/Shield slot: on mobile the +/− enhancement row goes BELOW the
+     dropdown so long armor names don't push the buttons off-screen.
+     Two-column grid: [label | field] row 1, [empty | enhance] row 2.
+     ─────────────────────────────────────────────────────────────────── */
+  .armor-slot {
+    grid-template-columns: 90px 1fr;
+    grid-template-rows: auto auto;
+    align-items: start;
+  }
+  .armor-slot > label {
+    grid-row: 1;
+    grid-column: 1;
+    padding-top: 6px; /* vertically centre with the dropdown trigger */
+  }
+  .armor-slot > .armor-slot-field {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .armor-slot > .armor-enhance {
+    grid-row: 2;
+    grid-column: 2;
+    justify-content: flex-start;
+    min-width: 0;
+    padding-top: 2px;
   }
 
   /* ── Armor enhancement ± buttons: compact like resource-pool rp-step ──

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>D&D 5e Character Sheet</title>
-<link rel="stylesheet" href="style.css?v=20260524e">
+<link rel="stylesheet" href="style.css?v=20260524f">
 </head>
 <body>
 
@@ -354,6 +354,11 @@
         <div class="armor-slot">
           <label>Shield</label>
           <div class="armor-slot-field" data-slot="shieldSlot"></div>
+          <div class="armor-enhance" id="shield-enhance" title="Magic enhancement (+N to AC). Range 0–10.">
+            <button type="button" id="shield-enhance-dn" class="stepper-btn" title="−1">&minus;</button>
+            <span id="shield-enhance-val">+0</span>
+            <button type="button" id="shield-enhance-up" class="stepper-btn" title="+1">+</button>
+          </div>
         </div>
         <div class="armor-slot">
           <label>Magic Item</label>
@@ -734,6 +739,6 @@
 <div id="toast" class="toast hidden"></div>
 
 <script src="Supplements/starters.js"></script>
-<script src="app.js?v=20260524k"></script>
+<script src="app.js?v=20260524l"></script>
 </body>
 </html>
