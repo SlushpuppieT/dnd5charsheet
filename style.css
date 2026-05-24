@@ -2817,4 +2817,16 @@ input.hb-deviation {
   .info-md-table td:first-child {
     white-space: normal;
   }
+
+  /* ── Combat tab: Attacks & Weapons floated above Death Saves ────────────
+     Assign explicit flex-order values so attacks (order 3) appears before
+     death saves (order 4) while the stat cards stay on top (orders 1–2).
+     .armor-section is moved to the Equipment tab by JS so its order here
+     doesn't matter, but give it a high value as a safe fallback.
+     ─────────────────────────────────────────────────────────────────── */
+  .tab-panel[data-tab="combat"] > .card.combat-top { order: 1; }
+  .tab-panel[data-tab="combat"] > .card.hp         { order: 2; }
+  #attacks-card                                     { order: 3; }
+  #death-saves-card                                 { order: 4; }
+  .armor-section                                    { order: 5; }
 }

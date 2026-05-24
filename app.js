@@ -7075,6 +7075,28 @@ function wireInfoButton() {
 }
 
 // ====================================================================
+// Mobile layout helpers
+// ====================================================================
+
+/**
+ * On mobile (< 769 px) the Armor section belongs in the Equipment tab so the
+ * Combat tab stays focused on HP / attacks. On desktop all panels are visible
+ * simultaneously and Armor lives in the Combat column.
+ *
+ * We physically move the DOM node (not clone it) so all event listeners,
+ * IDs, and data attributes stay intact — no re-wiring needed.
+ */
+function placeArmorSection() {
+  const isMobile = window.innerWidth < 769;
+  const armor  = document.querySelector('.armor-section');
+  if (!armor) return;
+  const target = isMobile
+    ? document.querySelector('.tab-panel[data-tab="equipment"]')
+    : document.querySelector('.tab-panel[data-tab="combat"]');
+  if (target && !target.contains(armor)) target.appendChild(armor);
+}
+
+// ====================================================================
 // Boot
 // ====================================================================
 function boot() {
@@ -7112,6 +7134,15 @@ function boot() {
   // Wire the Retry button in the API failure banner
   $('#api-retry-btn')?.addEventListener('click', () => loadPresets());
   loadPresets();
+
+  // Place armor section in the correct tab for the initial viewport
+  placeArmorSection();
+  // Re-run on resize so switching orientation / resizing to desktop works
+  let _armorPlaceTimer = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_armorPlaceTimer);
+    _armorPlaceTimer = setTimeout(placeArmorSection, 150);
+  });
 }
 boot();
 
