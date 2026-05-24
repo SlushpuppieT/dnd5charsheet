@@ -56,6 +56,7 @@ function blankCharacter() {
     asiChoices: [],          // [{ level:4, str:2 }, { level:8, dex:1, con:1 }]
     saves: {},               // { str: true, ... } — proficient saves
     skills: {},              // { acrobatics: { prof:false, exp:false, misc:0 } }
+    expertiseOrder: [],      // skill keys in the order expertise was selected — used to flag *excess* picks correctly
     customSkills: [],        // [{ key, name, ability, source }] — extra skills beyond the standard 18 (e.g. A5E Culture)
 
     ac: 10,
@@ -424,9 +425,19 @@ function renderSkills() {
 
   const skillList = allSkills();
   const customByKey = new Map((character.customSkills || []).map(c => [c.key, c]));
-  // Running counter: consume expertise slots in skill-list order so only the
-  // *excess* expertise checkboxes (beyond expAvail) are flagged non-standard.
-  let expSlotsConsumed = 0;
+
+  // Build the set of skill keys that are within the allowed expertise slots,
+  // honouring selection order (most recently picked is the "excess" one).
+  // expertiseOrder tracks keys in the order the user checked them; any exp-ed
+  // skills not yet in the array (old saves) are appended in alphabetical order.
+  const _expOrder = character.expertiseOrder || [];
+  const _expOrderSet = new Set(_expOrder.filter(k => character.skills[k]?.exp));
+  const _expUnordered = skillList
+    .filter(s => character.skills[s.key]?.exp && !_expOrderSet.has(s.key))
+    .map(s => s.key);
+  // ordered first (user's real selections), then any untracked legacy ones
+  const _allExpOrdered = [..._expOrder.filter(k => character.skills[k]?.exp), ..._expUnordered];
+  const allowedExpSkills = new Set(_allExpOrdered.slice(0, expAvail));
   skillList.forEach(s => {
     const st = character.skills[s.key] || { prof: false, exp: false, misc: 0 };
     const mod = abilityMod(totalAbility(s.ability))
@@ -441,13 +452,9 @@ function renderSkills() {
     const isDeviation = standardSystemActive && (
       (st.prof && !src) || (isFixedAutoGrant && !st.prof)
     );
-    // Expertise deviation: consume one allowed slot per checked expertise (in list
-    // order); only flag the skill if its slot falls beyond what the class permits.
-    let isExpDeviation = false;
-    if (st.exp) {
-      expSlotsConsumed++;
-      isExpDeviation = standardSystemActive && (expSlotsConsumed > expAvail);
-    }
+    // Expertise deviation: flag only expertise picks that fall outside the
+    // allowed slots, determined by selection order (not alphabetical order).
+    const isExpDeviation = st.exp && standardSystemActive && !allowedExpSkills.has(s.key);
     let tagHtml = '';
     if (src) {
       // Fixed auto-grants from background are non-clickable — the source is
@@ -460,6 +467,22 @@ function renderSkills() {
         // Choice picks (bg-pick, class, subclass-pick, race-pick) and other fixed
         // grants remain click-removable to free pick slots / for correction.
         tagHtml = `<span class="skill-src-tag skill-src-${skillSrcCssClass(src)} clickable" data-skill-tag="${s.key}" data-tag-source="${src}" data-tag-action="remove" title="Click to remove (${srcTitle[src] || src} grant)">${skillSrcLabel(src)}</span>`;
+      }
+      // For user-chosen picks (not fixed grants like 'background'/'subclass'/'race'),
+      // also show re-assign hints for OTHER sources that still have open slots.
+      // This fixes the case where all bgSkillOptions entries are already class/race
+      // proficient — the hollow hint appears alongside the existing tag so the user
+      // can swap the source in one click (e.g. class→BG frees the class slot).
+      const isUserPick = src === 'class' || src === 'bg-pick' || src === 'subclass-pick' || src === 'race-pick';
+      if (isUserPick) {
+        const reHints = [];
+        if (src !== 'class'         && isClassEligible(s.key)) reHints.push({ label: 'CLASS', css: 'class',      src: 'class',         title: 'Reassign as a class pick (frees current slot)' });
+        if (src !== 'bg-pick'       && isBgEligible(s.key))    reHints.push({ label: 'BG',    css: 'background', src: 'bg-pick',       title: 'Reassign as a background pick (frees current slot)' });
+        if (src !== 'subclass-pick' && isSubEligible(s.key))   reHints.push({ label: 'SUB',   css: 'subclass',   src: 'subclass-pick', title: 'Reassign as a subclass pick (frees current slot)' });
+        if (src !== 'race-pick'     && isRaceEligible(s.key))  reHints.push({ label: 'RACE',  css: 'race',       src: 'race-pick',     title: 'Reassign as a race pick (frees current slot)' });
+        tagHtml += reHints.map(h =>
+          `<span class="skill-src-tag skill-src-${h.css} skill-src-hint clickable" data-skill-tag="${s.key}" data-tag-source="${h.src}" data-tag-action="assign" title="${h.title}">${h.label}</span>`
+        ).join('');
       }
     } else if (!st.prof) {
       const hints = [];
@@ -518,7 +541,16 @@ function renderSkills() {
       const field = e.target.dataset.field;
       if (!character.skills[key]) character.skills[key] = { prof: false, exp: false, misc: 0 };
       character.skills[key][field] = e.target.checked;
-      if (field === 'prof') {
+      if (field === 'exp') {
+        // Maintain selection-order array so flagging targets the newest pick, not
+        // whichever comes last alphabetically.
+        character.expertiseOrder = character.expertiseOrder || [];
+        if (e.target.checked) {
+          if (!character.expertiseOrder.includes(key)) character.expertiseOrder.push(key);
+        } else {
+          character.expertiseOrder = character.expertiseOrder.filter(k => k !== key);
+        }
+      } else if (field === 'prof') {
         if (e.target.checked) {
           if (!character.skillSources[key]) {
             const src = character.skillSources;
@@ -569,6 +601,7 @@ function renderSkills() {
         } else {
           // Unchecking proficiency also clears expertise (can't have ×2 without prof)
           character.skills[key].exp = false;
+          character.expertiseOrder = (character.expertiseOrder || []).filter(k => k !== key);
           // Unchecking a user-pick frees it (auto-grants remain)
           const s = character.skillSources[key];
           if (s === 'class' || s === 'bg-pick' || s === 'subclass-pick' || s === 'race-pick') delete character.skillSources[key];
@@ -595,6 +628,8 @@ function renderSkills() {
           // Expertise pick — only if proficient
           if (!character.skills[key].prof) { toast('Need proficiency first'); return; }
           character.skills[key].exp = true;
+          character.expertiseOrder = character.expertiseOrder || [];
+          if (!character.expertiseOrder.includes(key)) character.expertiseOrder.push(key);
         } else {
           character.skillSources = character.skillSources || {};
           character.skillSources[key] = src;
@@ -603,12 +638,14 @@ function renderSkills() {
       } else if (action === 'remove') {
         if (src === 'exp') {
           character.skills[key].exp = false;
+          character.expertiseOrder = (character.expertiseOrder || []).filter(k => k !== key);
         } else {
           // Free this source. Auto-grant sources (class-locked, fixed bg, fixed
           // sub, fixed race) also lose their prof, mirroring an explicit uncheck.
           delete (character.skillSources || {})[key];
           character.skills[key].prof = false;
           character.skills[key].exp  = false;
+          character.expertiseOrder = (character.expertiseOrder || []).filter(k => k !== key);
         }
       }
       renderSkills();
@@ -1679,7 +1716,8 @@ function buildCustomDropdowns() {
     });
 
     // Trigger hover → summary card for currently selected item
-    btn.addEventListener('mouseenter', () => {
+    btn.addEventListener('pointerenter', e => {
+      if (e.pointerType !== 'mouse') return;   // no hover card on touch/stylus
       const slug = character[preset + 'Slug'] || '';
       if (!slug || slug === '__custom__') return;
       const item = getPresetItem(preset, slug);
@@ -1687,7 +1725,7 @@ function buildCustomDropdowns() {
       const html = renderPresetHoverContent(preset, item);
       if (html) showPresetHoverCard(html, btn.getBoundingClientRect(), 'below');
     });
-    btn.addEventListener('mouseleave', hidePresetHoverCard);
+    btn.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hidePresetHoverCard(); });
 
     // ── Panel (appended to <body> so position:fixed has no clipping) ─
     const panel = document.createElement('div');
@@ -1751,6 +1789,7 @@ function positionPresetPanel(preset) {
 }
 
 function openPresetDropdown(preset) {
+  hidePresetHoverCard();   // dismiss any lingering hover card before the panel opens
   if (_openDdPreset && _openDdPreset !== preset) closePresetDropdown();
   _openDdPreset = preset;
 
@@ -1896,12 +1935,13 @@ function makeDdOption(preset, slug, label, item, isSubrace = false) {
 
   if (!slug || slug === '__custom__' || !item) return opt;
 
-  // Hover → quick-summary card to the right of the row
-  opt.addEventListener('mouseenter', () => {
+  // Hover → quick-summary card to the right of the row (mouse only — not touch)
+  opt.addEventListener('pointerenter', e => {
+    if (e.pointerType !== 'mouse') return;
     const html = renderPresetHoverContent(preset, item);
     if (html) showPresetHoverCard(html, opt.getBoundingClientRect(), 'right');
   });
-  opt.addEventListener('mouseleave', hidePresetHoverCard);
+  opt.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hidePresetHoverCard(); });
 
   // Right-click → close dropdown and open the detail popup
   opt.addEventListener('contextmenu', e => {
@@ -2039,13 +2079,14 @@ function buildArmorDropdowns() {
       e.stopPropagation();
       _openArmorSlot === slotKey ? closeArmorDropdown() : openArmorDropdown(slotKey);
     });
-    btn.addEventListener('mouseenter', () => {
+    btn.addEventListener('pointerenter', e => {
+      if (e.pointerType !== 'mouse') return;   // no hover card on touch/stylus
       const cur = character[slotKey];
       if (!cur) return;
       const html = renderArmorHoverContent(cur);
       if (html) showPresetHoverCard(html, btn.getBoundingClientRect(), 'below');
     });
-    btn.addEventListener('mouseleave', hidePresetHoverCard);
+    btn.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hidePresetHoverCard(); });
     btn.addEventListener('contextmenu', e => {
       e.preventDefault();
       const cur = character[slotKey];
@@ -2277,11 +2318,12 @@ function makeArmorDdOption(slotKey, item, label) {
 
   if (!item) return opt;
 
-  opt.addEventListener('mouseenter', () => {
+  opt.addEventListener('pointerenter', e => {
+    if (e.pointerType !== 'mouse') return;
     const html = renderArmorHoverContent(item);
     if (html) showPresetHoverCard(html, opt.getBoundingClientRect(), 'right');
   });
-  opt.addEventListener('mouseleave', hidePresetHoverCard);
+  opt.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hidePresetHoverCard(); });
 
   opt.addEventListener('contextmenu', e => {
     e.preventDefault();
@@ -5429,8 +5471,15 @@ function ensureSkillProf(key, source) {
   if (!character.skillSources) character.skillSources = {};
   if (!character.skills[key]) character.skills[key] = { prof: false, exp: false, misc: 0 };
   character.skills[key].prof = true;
-  // Don't overwrite an existing source (first grant wins)
-  if (source && !character.skillSources[key]) character.skillSources[key] = source;
+  if (!source) return;
+  const existing   = character.skillSources[key];
+  // Fixed grants (background/subclass/race) beat user picks (class/bg-pick/subclass-pick/race-pick).
+  // User picks don't overwrite fixed grants. Same-tier stays first-wins.
+  const isFixed    = source === 'background' || source === 'subclass' || source === 'race';
+  const isUserPick = existing === 'class' || existing === 'bg-pick' || existing === 'subclass-pick' || existing === 'race-pick';
+  if (!existing || (isFixed && isUserPick)) {
+    character.skillSources[key] = source;
+  }
 }
 
 function clearSubclassSkillGrants() {
