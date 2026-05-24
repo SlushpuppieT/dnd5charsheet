@@ -2624,4 +2624,38 @@ input.hb-deviation {
 
   /* ── HP grid: equal columns ── */
   .hp-grid { grid-template-columns: repeat(3, 1fr); }
+
+  /* ── Ability score cards: compact ──────────────────────────────────────
+     min-width: 0 lets the 1fr grid actually shrink the cells.
+     Reduced letter-spacing is the key fix — "CONSTITUTION" at 0.1em is
+     wider than the cell; dropping to 0.02em keeps it readable and fitting.
+     ─────────────────────────────────────────────────────────────────── */
+  .ability-grid { gap: 6px; }
+  .ability {
+    padding: 6px 3px;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .ability .name {
+    font-size: 0.65rem;
+    letter-spacing: 0.02em;
+  }
+  .ability .mod  { font-size: 1.25rem; margin: 2px 0; }
+  .ab-total      { font-size: 0.95rem; margin: 1px 0 3px; }
+  .ab-base-row input[type="number"] { width: 36px; font-size: 0.72rem; }
+
+  /* ── Compact stepper buttons in tight multi-column cards ──────────────
+     The global min-width: 44px is correct for standalone steppers, but
+     inside 3-column grids (HP, combat stats, ability scores) it causes
+     horizontal overflow. Match the rp-step approach: smaller fixed size,
+     still tall enough to tap reliably.
+     ─────────────────────────────────────────────────────────────────── */
+  .card.hp .stepper-btn,
+  .card.combat-top .stepper-btn,
+  .ability .stepper-btn {
+    min-width: 30px;
+    min-height: 36px;
+    font-size: 0.9rem;
+    padding: 0;
+  }
 }
