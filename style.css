@@ -2548,8 +2548,8 @@ input.hb-deviation {
   display: none;   /* made flex in mobile media query */
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 5px 12px;
+  gap: 5px;
+  padding: 5px 6px;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border);
   font-size: 0.82rem;
@@ -2565,7 +2565,7 @@ input.hb-deviation {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 40%;
+  max-width: 52%;
 }
 #mini-class-level { color: var(--text); }
 #mini-hp          { color: var(--text); font-weight: 600; }

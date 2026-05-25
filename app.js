@@ -6395,6 +6395,7 @@ function applyClass(slug) {
     character.subclassSlug = '';
     character.subclass = '';
     character.spellAbility = '';   // clear old class's ability; new class will set it if applicable
+    character.saves = {};          // clear all saving throw proficiencies; new class re-applies its own
   }
   character.class = c.name;
   character.classSlug = c.slug;
