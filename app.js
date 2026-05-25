@@ -3166,10 +3166,24 @@ function applyUnlockedSubclassGrants() {
   const sub = (c.archetypes || []).find(a => a.slug === character.subclassSlug);
   if (!sub) return [];
   const charLevel = Math.max(1, Math.min(20, Number(character.level) || 1));
+
+  // Determine the earliest level any subclass feature unlocks (default 3).
+  // If the character hasn't reached that level yet, suppress all grants:
+  //   • reset budget to 0 so isSubEligible() returns false for existing picks
+  //   • clear fixed-skill list so no auto-proficiencies are applied
+  //   • leave skillSources / subclassSkillPicked intact (non-destructive)
+  const features = parseSubclassFeatures(sub.desc);
+  const unlockLevel = features.length ? Math.min(...features.map(f => f.level)) : 3;
+  if (charLevel < unlockLevel) {
+    character.subclassSkillCount  = 0;
+    character.subclassFixedSkills = [];
+    return [];
+  }
+
   const granted = new Set();
   const fixedSkills = new Set();
   let choiceCount = 0;
-  parseSubclassFeatures(sub.desc).forEach(f => {
+  features.forEach(f => {
     if (f.level > charLevel) return;
     extractSkillGrants(f.body).forEach(k => {
       fixedSkills.add(k);
