@@ -5294,15 +5294,15 @@ async function loadPresets() {
 
 // Friendly source tags for non-SRD content.
 const SOURCE_TAGS = {
-  ‘wotc-srd’:   ‘’,
-  ‘srd-2024’:   ‘SRD 2024’,
-  ‘toh’:        ‘ToH’,         // Tome of Heroes (Kobold Press)
-  ‘a5e’:        ‘A5E’,         // Level Up: Advanced 5e
-  ‘taldorei’:   ‘Tal’Dorei’,
-  ‘o5e’:        ‘Open5e’,
-  ‘kp’:         ‘Kobold’,
-  ‘blackflag’:  ‘BlackFlag’,
-  ‘supplement’: ‘Custom’,
+  'wotc-srd':   '',
+  'srd-2024':   'SRD 2024',
+  'toh':        'ToH',         // Tome of Heroes (Kobold Press)
+  'a5e':        'A5E',         // Level Up: Advanced 5e
+  'taldorei':   'Tal\u2019Dorei',
+  'o5e':        'Open5e',
+  'kp':         'Kobold',
+  'blackflag':  'BlackFlag',
+  'supplement': 'Custom',
 };
 function sourceTag(slug) {
   if (slug in SOURCE_TAGS) return SOURCE_TAGS[slug];
