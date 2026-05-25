@@ -81,7 +81,7 @@ function blankCharacter() {
     deathSuccesses: [false, false, false],
     deathFailures:  [false, false, false],
 
-    attacks: [],             // [{ name, bonus, damage, notes }]
+    attacks: [],             // [{ name, bonus, damage }]
 
     spellAbility: '',
     cantripsKnown: 0,        // auto-populated for known classes, editable for custom
@@ -135,7 +135,9 @@ let character = blankCharacter();
 // Math
 // ====================================================================
 function abilityMod(score) {
-  return Math.floor((Number(score) - 10) / 2);
+  const n = Number(score);
+  if (isNaN(n)) return 0;
+  return Math.floor((n - 10) / 2);
 }
 function fmtMod(n) {
   return (n >= 0 ? '+' : '') + n;
@@ -1381,7 +1383,8 @@ function findCachedSpells(name) {
   // Edition ordering: 2014 SRD first, 2024 SRD second, then alphabetical by source
   const order = { 'srd-2014': 0, 'srd-2024': 1 };
   return cached
-    .filter(p => p.name && p.name.toLowerCase().trim() === norm)
+    .filter(p => p.name && p.name.toLowerCase().trim() === norm
+                        && isSourceEnabled(spellDocKey(p)))
     .sort((a, b) => {
       const ad = spellDocKey(a), bd = spellDocKey(b);
       const ao = order[ad] ?? 99;
@@ -1561,7 +1564,7 @@ function renderSpellPopupDetail(detail, ref, includeApply = false) {
     ${rangeStr ? `<div class="spell-detail-line"><b>Range:</b> ${escapeHTML(rangeStr)}</div>` : ''}
     ${compsStr ? `<div class="spell-detail-line"><b>Components:</b> ${compsStr}${detail.material_specified ? ' (' + escapeHTML(detail.material_specified) + ')' : ''}</div>` : ''}
     ${durStr   ? `<div class="spell-detail-line"><b>Duration:</b>${conc} ${escapeHTML(durStr)}</div>` : ''}
-    ${detail.desc         ? `<div class="spell-detail-desc">${escapeHTML(detail.desc)}</div>` : ''}
+    ${detail.desc         ? `<div class="spell-detail-desc">${renderMarkdown(detail.desc)}</div>` : ''}
     ${detail.higher_level ? `<div class="spell-detail-higher"><b>At Higher Levels:</b> ${escapeHTML(detail.higher_level)}</div>` : ''}
     <div class="spell-detail-link"><a href="${url}" target="_blank" rel="noopener">View on open5e &#x2197;</a></div>
     ${applyBtn}
@@ -1622,13 +1625,16 @@ function getPresetItem(preset, slug) {
  */
 function docSlugToUrlPrefix(docSlug) {
   if (!docSlug || docSlug === 'wotc-srd') return 'srd';
-  if (docSlug === 'o5e') return 'open5e';  // API slug is 'o5e'; URL prefix is 'open5e'
-  return docSlug; // 'srd-2024', 'a5e', 'toh', 'kp', 'blackflag', etc. map as-is
+  if (docSlug === 'o5e')       return 'open5e';   // API slug is 'o5e'; URL prefix is 'open5e'
+  if (docSlug === 'a5e')       return 'a5e-ag';   // v1 API uses 'a5e'; open5e.com URL uses 'a5e-ag'
+  if (docSlug === 'blackflag') return 'bfrd';     // v1 API uses 'blackflag'; open5e.com URL uses 'bfrd'
+  if (docSlug === 'taldorei')  return 'tdcs';     // v1 API uses 'taldorei'; open5e.com URL uses 'tdcs'
+  return docSlug; // 'srd-2024', 'toh', 'kp', etc. map as-is
 }
 
 /** open5e.com URL for a preset item (uses v2-style "{prefix}_{slug}" format). */
 function presetOpen5eUrl(preset, item) {
-  const paths  = { class: 'classes', race: 'races', background: 'backgrounds' };
+  const paths  = { class: 'classes', race: 'species', background: 'backgrounds' };
   if (preset === 'background' || item._v2slug) {
     // v2 keys (backgrounds and v2 classes) already contain the full prefix,
     // e.g. "a5e-ag_hermit" or "a5e_marshal" — use slug directly.
@@ -1640,6 +1646,29 @@ function presetOpen5eUrl(preset, item) {
   return `https://open5e.com/${paths[preset] || preset}/${encodeURIComponent(prefix + '_' + baseSl)}`;
 }
 
+/**
+ * Populate the sticky footer of the preset/feat/armor popup with a
+ * "View on open5e" link (left) and an action button (right).
+ */
+function setPresetPopupFooter(url, btnHtml) {
+  const footer = $('#preset-popup-footer');
+  if (!footer) return;
+  const linkHtml = url
+    ? `<a href="${escapeAttr(url)}" target="_blank" rel="noopener" class="preset-popup-ext-link">View on open5e &#x2197;</a>`
+    : '<span></span>';
+  footer.innerHTML = linkHtml + (btnHtml || '');
+}
+
+/**
+ * Strip a leading bold/italic section-header from an API field value.
+ * Handles **_Name._** (SRD/wotc), ***Name*** (toh), and **Name.** variants.
+ * e.g. "**_Languages._** You can speak…"  -> "You can speak…"
+ *      "***Ability Score Increase.*** Your…" -> "Your…"
+ */
+function stripApiPrefix(text) {
+  return String(text || '').replace(/^\*{2,3}_?[^*\n]+_?\*{2,3}\.?\s*/, '').trim();
+}
+
 /** HTML for the small hover-card (key facts only). */
 function renderPresetHoverContent(preset, item) {
   const lines = [];
@@ -1649,15 +1678,15 @@ function renderPresetHoverContent(preset, item) {
     if (item.prof_saving_throws) lines.push(`Saves: ${escapeHTML(item.prof_saving_throws)}`);
     if (item.prof_skills)        lines.push(`Skills: ${escapeHTML(item.prof_skills)}`);
   } else if (preset === 'race') {
-    if (item.asi_desc)  lines.push(`ASI: ${escapeHTML(item.asi_desc)}`);
+    if (item.asi_desc)  lines.push(`Ability Score Increase (ASI): ${escapeHTML(stripApiPrefix(item.asi_desc))}`);
     const spd = item.speed && (typeof item.speed === 'object' ? item.speed.walk : item.speed);
     if (spd)            lines.push(`Speed: <b>${spd} ft</b>`);
-    if (item.languages) lines.push(`Languages: ${escapeHTML(item.languages)}`);
+    if (item.languages) lines.push(`Languages: ${escapeHTML(stripApiPrefix(item.languages))}`);
   } else if (preset === 'background') {
-    if (item.asi_desc)            lines.push(`ASI: ${escapeHTML(item.asi_desc)}`);
+    if (item.asi_desc)            lines.push(`Ability Score Increase (ASI): ${escapeHTML(stripApiPrefix(item.asi_desc))}`);
     if (item.skill_proficiencies) lines.push(`Skills: ${escapeHTML(item.skill_proficiencies)}`);
     if (item.tool_proficiencies)  lines.push(`Tools: ${escapeHTML(item.tool_proficiencies)}`);
-    if (item.languages)           lines.push(`Languages: ${escapeHTML(item.languages)}`);
+    if (item.languages)           lines.push(`Languages: ${escapeHTML(stripApiPrefix(item.languages))}`);
   }
   if (!lines.length) return '';
   return `<div class="phc-name">${escapeHTML(item.name)}</div>` +
@@ -1675,18 +1704,19 @@ function renderPresetPopupContent(preset, item) {
     if (item.prof_tools)         html += `<div class="spell-detail-line"><b>Tools:</b> ${escapeHTML(item.prof_tools)}</div>`;
     if (item.prof_saving_throws) html += `<div class="spell-detail-line"><b>Saves:</b> ${escapeHTML(item.prof_saving_throws)}</div>`;
     if (item.prof_skills)        html += `<div class="spell-detail-line"><b>Skills:</b> ${escapeHTML(item.prof_skills)}</div>`;
-    if (item.desc)               html += `<div class="spell-detail-desc">${escapeHTML(item.desc)}</div>`;
+    if (item.desc)               html += `<div class="spell-detail-desc">${renderMarkdown(item.desc)}</div>`;
   } else if (preset === 'race') {
-    const spd = item.speed && (typeof item.speed === 'object' ? item.speed.walk : item.speed);
-    html += `<div class="spell-detail-line">${item.size ? escapeHTML(item.size) + ' &bull; ' : ''}${spd ? 'Speed ' + spd + ' ft' : ''}</div>`;
-    if (item.asi_desc)  html += `<div class="spell-detail-line"><b>ASI:</b> ${escapeHTML(item.asi_desc)}</div>`;
-    if (item.languages) html += `<div class="spell-detail-line"><b>Languages:</b> ${escapeHTML(item.languages)}</div>`;
-    if (item.desc)      html += `<div class="spell-detail-desc">${escapeHTML(item.desc)}</div>`;
+    const spd       = item.speed && (typeof item.speed === 'object' ? item.speed.walk : item.speed);
+    const sizeLabel = item.size_raw || item.size;  // size_raw = "Small"; size may be a full-desc blob
+    html += `<div class="spell-detail-line">${sizeLabel ? escapeHTML(sizeLabel) + ' &bull; ' : ''}${spd ? 'Speed ' + spd + ' ft' : ''}</div>`;
+    if (item.asi_desc)  html += `<div class="spell-detail-line"><b>Ability Score Increase (ASI):</b> ${escapeHTML(stripApiPrefix(item.asi_desc))}</div>`;
+    if (item.languages) html += `<div class="spell-detail-line"><b>Languages:</b> ${escapeHTML(stripApiPrefix(item.languages))}</div>`;
+    if (item.desc)      html += `<div class="spell-detail-desc">${renderMarkdown(item.desc)}</div>`;
   } else if (preset === 'background') {
-    if (item.asi_desc)            html += `<div class="spell-detail-line"><b>ASI:</b> ${escapeHTML(item.asi_desc)}</div>`;
+    if (item.asi_desc)            html += `<div class="spell-detail-line"><b>Ability Score Increase (ASI):</b> ${escapeHTML(stripApiPrefix(item.asi_desc))}</div>`;
     if (item.skill_proficiencies) html += `<div class="spell-detail-line"><b>Skills:</b> ${escapeHTML(item.skill_proficiencies)}</div>`;
     if (item.tool_proficiencies)  html += `<div class="spell-detail-line"><b>Tools:</b> ${escapeHTML(item.tool_proficiencies)}</div>`;
-    if (item.languages)           html += `<div class="spell-detail-line"><b>Languages:</b> ${escapeHTML(item.languages)}</div>`;
+    if (item.languages)           html += `<div class="spell-detail-line"><b>Languages:</b> ${escapeHTML(stripApiPrefix(item.languages))}</div>`;
     if (item.feat_name) {
       const featUrl = item.feat_slug
         ? `https://open5e.com/feats/${encodeURIComponent(item.feat_slug)}`
@@ -1697,15 +1727,9 @@ function renderPresetPopupContent(preset, item) {
       html += `<div class="spell-detail-line"><b>Feat:</b> ${featLabel}</div>`;
     }
     if (item.feature)             html += `<div class="spell-detail-line"><b>Feature:</b> ${escapeHTML(item.feature)}</div>`;
-    if (item.feature_desc)        html += `<div class="spell-detail-desc">${escapeHTML(item.feature_desc)}</div>`;
+    if (item.feature_desc)        html += `<div class="spell-detail-desc">${renderMarkdown(item.feature_desc)}</div>`;
     if (item.equipment)           html += `<div class="spell-detail-line"><b>Equipment:</b> ${escapeHTML(item.equipment)}</div>`;
   }
-  const url = presetOpen5eUrl(preset, item);
-  const applyLabel = { class: 'Set Class', race: 'Set Race', background: 'Apply Background' }[preset] || 'Apply';
-  html += `
-    <div class="spell-detail-link"><a href="${url}" target="_blank" rel="noopener">View on open5e &#x2197;</a></div>
-    <div style="margin-top:10px"><button class="btn btn-sm preset-popup-apply">${applyLabel}</button></div>
-  `;
   return html;
 }
 
@@ -1714,10 +1738,12 @@ function openPresetPopup(preset, slug) {
   const item = getPresetItem(preset, slug);
   if (!item) { toast('SRD data not loaded yet — connect to load presets'); return; }
   $('#preset-popup-title').textContent = item.name;
-  const content = $('#preset-popup-content');
-  content.innerHTML = renderPresetPopupContent(preset, item);
+  $('#preset-popup-content').innerHTML = renderPresetPopupContent(preset, item);
+  const url        = presetOpen5eUrl(preset, item);
+  const applyLabel = { class: 'Set Class', race: 'Set Race', background: 'Apply Background' }[preset] || 'Apply';
+  setPresetPopupFooter(url, `<button class="btn btn-sm preset-popup-apply">${applyLabel}</button>`);
   $('#preset-popup-overlay').classList.remove('hidden');
-  content.querySelector('.preset-popup-apply')?.addEventListener('click', () => {
+  $('#preset-popup-footer').querySelector('.preset-popup-apply')?.addEventListener('click', () => {
     $('#preset-popup-overlay').classList.add('hidden');
     // Sync the select element then apply
     const sel = $(`select[data-preset="${preset}"]`);
@@ -1867,18 +1893,21 @@ function positionPresetPanel(preset) {
   panel.style.minWidth = Math.max(rect.width, 220) + 'px';
   panel.style.left     = rect.left + 'px';
   const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
   if (spaceBelow >= 120) {
-    panel.style.top    = (rect.bottom + 2) + 'px';
-    panel.style.bottom = 'auto';
+    panel.style.top       = (rect.bottom + 2) + 'px';
+    panel.style.bottom    = 'auto';
+    panel.style.maxHeight = Math.min(spaceBelow, 340) + 'px';
   } else {
-    panel.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
-    panel.style.top    = 'auto';
+    panel.style.bottom    = (window.innerHeight - rect.top + 2) + 'px';
+    panel.style.top       = 'auto';
+    panel.style.maxHeight = Math.min(spaceAbove, 340) + 'px';
   }
 }
 
 function openPresetDropdown(preset) {
   hidePresetHoverCard();   // dismiss any lingering hover card before the panel opens
-  if (_openDdPreset && _openDdPreset !== preset) closePresetDropdown();
+  closeAllDropdowns();
   _openDdPreset = preset;
 
   const dd    = $(`#preset-dd-${preset}`);
@@ -1953,8 +1982,18 @@ function populatePresetDropdown(preset) {
              : preset === 'race'  ? presetCache.race
              :                      presetCache.background) || [];
 
+  const currentSlug = character[preset + 'Slug'] || '';
+  // For race, the active base slug may be the part before ':'
+  const currentBase = currentSlug.split(':')[0];
+
   const grouped = {};
-  raw.forEach(i => { const k = i.document__slug || 'other'; (grouped[k] ||= []).push(i); });
+  raw.forEach(i => {
+    // Always include the currently-selected item (by base slug) even when filtered
+    const isActive = preset === 'race' ? i.slug === currentBase : i.slug === currentSlug;
+    if (!isSourceEnabled(i.document__slug) && !isActive) return;
+    const k = i.document__slug || 'other';
+    (grouped[k] ||= []).push(i);
+  });
   const keys = Object.keys(grouped).sort((a, b) => {
     const ai = SOURCE_ORDER.indexOf(a), bi = SOURCE_ORDER.indexOf(b);
     return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
@@ -2275,17 +2314,20 @@ function positionArmorPanel(slotKey) {
   panel.style.minWidth = Math.max(rect.width, 280) + 'px';
   panel.style.left     = rect.left + 'px';
   const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
   if (spaceBelow >= 160) {
-    panel.style.top    = (rect.bottom + 2) + 'px';
-    panel.style.bottom = 'auto';
+    panel.style.top       = (rect.bottom + 2) + 'px';
+    panel.style.bottom    = 'auto';
+    panel.style.maxHeight = Math.min(spaceBelow, 340) + 'px';
   } else {
-    panel.style.bottom = (window.innerHeight - rect.top + 2) + 'px';
-    panel.style.top    = 'auto';
+    panel.style.bottom    = (window.innerHeight - rect.top + 2) + 'px';
+    panel.style.top       = 'auto';
+    panel.style.maxHeight = Math.min(spaceAbove, 340) + 'px';
   }
 }
 
 function openArmorDropdown(slotKey) {
-  if (_openArmorSlot && _openArmorSlot !== slotKey) closeArmorDropdown();
+  closeAllDropdowns();
   _openArmorSlot = slotKey;
   const dd    = $(`.armor-dd[data-slot="${slotKey}"]`);
   const panel = $(`#armor-ddp-${slotKey}`);
@@ -2351,12 +2393,15 @@ function populateArmorDropdown(slotKey) {
   list.appendChild(makeArmorDdOption(slotKey, null, ARMOR_SLOT_PLACEHOLDER[slotKey]));
 
   const isShieldCat = c => /shield/i.test(String(c || ''));
+  // Slug of currently-equipped item in this slot — always shown even if filtered
+  const equippedSlug = (character[slotKey] || {}).slug || '';
 
   if (slotKey === 'armorSlot') {
     // Group mundane armor by category (Light / Medium / Heavy) — shields handled in their own slot.
     const groups = {};
     (presetCache.armor || []).forEach(a => {
       if (isShieldCat(a.category)) return;
+      if (!isSourceEnabled(a.document__slug) && a.slug !== equippedSlug) return;
       const cat = a.category || 'Armor';
       (groups[cat] ||= []).push(a);
     });
@@ -2381,7 +2426,8 @@ function populateArmorDropdown(slotKey) {
     // Magic-armor replacements (Bracers of Defense, Robe of Archmagi, etc.)
     const repl = (presetCache.magicitems || [])
       .map(mi => ({ mi, p: parseMagicItemAC(mi) }))
-      .filter(x => x.p && x.p.kind === 'magic-armor');
+      .filter(x => x.p && x.p.kind === 'magic-armor'
+                       && (isSourceEnabled(x.mi.document__slug) || x.mi.slug === equippedSlug));
     if (repl.length) {
       const sep = document.createElement('div');
       sep.className = 'preset-dd-sep';
@@ -2395,7 +2441,8 @@ function populateArmorDropdown(slotKey) {
   } else if (slotKey === 'shieldSlot') {
     // Mundane shields from open5e armor endpoint
     (presetCache.armor || [])
-      .filter(a => isShieldCat(a.category))
+      .filter(a => isShieldCat(a.category)
+                   && (isSourceEnabled(a.document__slug) || a.slug === equippedSlug))
       .sort((a, b) => a.name.localeCompare(b.name))
       .forEach(a => {
         const item = { kind: 'shield', slug: a.slug, source: a.document__slug, name: a.name, raw: a };
@@ -2406,7 +2453,8 @@ function populateArmorDropdown(slotKey) {
     // Magic item slots — flat AC bonus items only
     const flats = (presetCache.magicitems || [])
       .map(mi => ({ mi, p: parseMagicItemAC(mi) }))
-      .filter(x => x.p && x.p.kind === 'flat');
+      .filter(x => x.p && x.p.kind === 'flat'
+                       && (isSourceEnabled(x.mi.document__slug) || x.mi.slug === equippedSlug));
     flats.sort((a, b) => a.mi.name.localeCompare(b.mi.name)).forEach(({ mi, p }) => {
       const item = { kind: 'magic-flat', slug: mi.slug, source: mi.document__slug, name: mi.name, acBonus: p.acBonus, raw: mi };
       list.appendChild(makeArmorDdOption(slotKey, item, `${mi.name} (${fmtMod(p.acBonus)} AC)`));
@@ -2576,18 +2624,20 @@ function armorOpen5eUrl(item) {
   const r = item.raw || {};
   const prefix = docSlugToUrlPrefix(r.document__slug || item.source);
   const slug   = item.slug || r.slug || '';
-  const path   = (item.kind === 'armor') ? 'armor' : 'magicitems';
-  return `https://open5e.com/${path}/${encodeURIComponent(prefix + '_' + slug)}`;
+  // open5e.com routes all armor, shields, and magic items under /equipment/
+  return `https://open5e.com/equipment/${encodeURIComponent(prefix + '_' + slug)}`;
 }
 
 function openArmorPopup(slotKey, item) {
   if (!item) return;
   if (item.slug === '__custom__') return;  // custom items use the inline input, no popup
   $('#preset-popup-title').textContent = item.name;
-  const content = $('#preset-popup-content');
-  content.innerHTML = renderArmorPopupContent(slotKey, item);
+  $('#preset-popup-content').innerHTML = renderArmorPopupContent(slotKey, item);
+  const url      = armorOpen5eUrl(item);
+  const equipped = character[slotKey]?.slug === item.slug;
+  setPresetPopupFooter(url, `<button class="btn btn-sm armor-popup-apply"${equipped ? ' disabled' : ''}>${equipped ? 'Already Equipped' : 'Equip'}</button>`);
   $('#preset-popup-overlay').classList.remove('hidden');
-  content.querySelector('.armor-popup-apply')?.addEventListener('click', () => {
+  $('#preset-popup-footer').querySelector('.armor-popup-apply')?.addEventListener('click', () => {
     $('#preset-popup-overlay').classList.add('hidden');
     pickArmorSlot(slotKey, item);
   });
@@ -2607,7 +2657,7 @@ function renderArmorPopupContent(slotKey, item) {
     if (r.stealth_disadvantage) html += `<div class="spell-detail-line"><b>Stealth:</b> Disadvantage</div>`;
     if (r.cost)   html += `<div class="spell-detail-line"><b>Cost:</b> ${escapeHTML(r.cost)}</div>`;
     if (r.weight) html += `<div class="spell-detail-line"><b>Weight:</b> ${escapeHTML(String(r.weight))}</div>`;
-    if (r.desc)   html += `<div class="spell-detail-desc">${escapeHTML(r.desc)}</div>`;
+    if (r.desc)   html += `<div class="spell-detail-desc">${renderMarkdown(r.desc)}</div>`;
   } else {
     if (r.type)   html += `<div class="spell-detail-line"><b>Type:</b> ${escapeHTML(r.type)}</div>`;
     if (r.rarity) html += `<div class="spell-detail-line"><b>Rarity:</b> ${escapeHTML(r.rarity)}</div>`;
@@ -2620,14 +2670,8 @@ function renderArmorPopupContent(slotKey, item) {
     } else {
       html += `<div class="spell-detail-line"><b>AC bonus:</b> ${fmtMod(item.acBonus)}</div>`;
     }
-    if (r.desc) html += `<div class="spell-detail-desc">${escapeHTML(r.desc)}</div>`;
+    if (r.desc) html += `<div class="spell-detail-desc">${renderMarkdown(r.desc)}</div>`;
   }
-  const url = armorOpen5eUrl(item);
-  const equipped = character[slotKey]?.slug === item.slug;
-  html += `
-    <div class="spell-detail-link"><a href="${url}" target="_blank" rel="noopener">View on open5e &#x2197;</a></div>
-    <div style="margin-top:10px"><button class="btn btn-sm armor-popup-apply"${equipped ? ' disabled' : ''}>${equipped ? 'Already Equipped' : 'Equip'}</button></div>
-  `;
   return html;
 }
 
@@ -3215,7 +3259,6 @@ function applyUnlockedSubclassGrants() {
   if (choiceCount > 0 && !character.subclassSkillPicked) {
     character.subclassSkillCount   = choiceCount;
     character.subclassSkillOptions = 'any';
-    character.subclassSkillPicked  = true;
     const subName = sub.name;
     openSkillChoiceModal({
       title: `${subName}: choose ${choiceCount} skill${choiceCount > 1 ? 's' : ''}`,
@@ -3223,6 +3266,7 @@ function applyUnlockedSubclassGrants() {
       count: choiceCount,
       options: SKILLS.map(s => s.name),
       onApply: chosen => {
+        character.subclassSkillPicked = true;
         chosen.forEach(n => { const sk = findSkill(n); if (sk) ensureSkillProf(sk.key, 'subclass-pick'); });
         renderAll();
         persist();
@@ -3269,31 +3313,17 @@ function renderClassFeatures() {
   const descs = parseFeatureDescs(c.desc);
   const charLevel = Math.max(1, Math.min(20, Number(character.level) || 1));
 
-  // Subclass picker
-  const archetypes = c.archetypes || [];
+  // Subclass picker — filter by source, always keep currently-selected subclass
+  const archetypes = (c.archetypes || []).filter(a =>
+    a._fromSupplement || isSourceEnabled(a.document__slug) || a.slug === character.subclassSlug
+  );
   const subtypeLabel = c.subtypes_name || 'Subclass';
   let subclassHtml = '';
   if (archetypes.length) {
-    const opts = archetypes
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(a => {
-        // Supplement entries prefer the user-provided sourceLabel (e.g. "PHB").
-        const tag = a._fromSupplement
-          ? (a._supplementMeta?.sourceLabel || 'Custom')
-          : sourceTag(a.document__slug);
-        const tagStr = tag ? ` [${tag}]` : '';
-        return `<option value="${escapeAttr(a.slug)}" ${a.slug === character.subclassSlug ? 'selected' : ''}>${escapeHTML(a.name)}${tagStr}</option>`;
-      })
-      .join('');
     subclassHtml = `
       <div class="subclass-row">
         <label>${escapeHTML(subtypeLabel)}:</label>
-        <select id="subclass-select">
-          <option value="">— none —</option>
-          <option value="__custom__">Custom…</option>
-          ${opts}
-        </select>
+        <div id="subclass-dd-host"></div>
       </div>
     `;
   }
@@ -3419,36 +3449,299 @@ function renderClassFeatures() {
     ab2Sel.addEventListener('change', saveASI);
   });
 
-  const subSel = $('#subclass-select');
-  if (subSel) {
-    subSel.addEventListener('change', e => {
-      const val = e.target.value;
-      clearSubclassSkillGrants(); // always strip old college's auto-granted skills first
-      if (val === '__custom__') {
-        character.subclassSlug = '';
-        const name = prompt('Custom subclass name:', character.subclass || '');
-        character.subclass = name || '';
-      } else if (val === '') {
-        character.subclassSlug = '';
-        character.subclass = '';
+  if (archetypes.length) buildSubclassDropdown(archetypes, subtypeLabel);
+}
+
+// ====================================================================
+// Subclass custom dropdown
+// ====================================================================
+let _subclassDdOpen = false;
+let _subclassGlobalListenerAdded = false;
+
+function closeSubclassDropdown() {
+  if (!_subclassDdOpen) return;
+  _subclassDdOpen = false;
+  $('#subclass-ddp')?.classList.add('hidden');
+  const caret = $('#subclass-dd')?.querySelector('.preset-dd-caret');
+  if (caret) caret.textContent = '▾';
+  hidePresetHoverCard();
+}
+
+/** Close every dropdown family — used for mutual-exclusion when opening any one. */
+function closeAllDropdowns() {
+  closePresetDropdown();
+  closeArmorDropdown();
+  closeFeatDropdown();
+  closeSubclassDropdown();
+}
+
+function positionSubclassPanel() {
+  const dd    = $('#subclass-dd');
+  const panel = $('#subclass-ddp');
+  if (!dd || !panel) return;
+  const rect = dd.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > window.innerHeight) { closeSubclassDropdown(); return; }
+  panel.style.minWidth = Math.max(rect.width, 220) + 'px';
+  panel.style.left     = rect.left + 'px';
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  if (spaceBelow >= 120) {
+    panel.style.top       = (rect.bottom + 2) + 'px';
+    panel.style.bottom    = 'auto';
+    panel.style.maxHeight = Math.min(spaceBelow, 340) + 'px';
+  } else {
+    panel.style.bottom    = (window.innerHeight - rect.top + 2) + 'px';
+    panel.style.top       = 'auto';
+    panel.style.maxHeight = Math.min(spaceAbove, 340) + 'px';
+  }
+}
+
+function renderSubclassHoverContent(arch) {
+  if (!arch) return '';
+  const tag = arch._fromSupplement
+    ? (arch._supplementMeta?.sourceLabel || 'Custom')
+    : sourceTag(arch.document__slug);
+  const lines = [];
+  if (tag) lines.push(`Source: <b>${escapeHTML(tag)}</b>`);
+  // First non-empty, non-heading line of desc as a short snippet
+  const snippet = (arch.desc || '').split('\n').find(l => l.trim() && !l.trim().startsWith('#'));
+  if (snippet) {
+    const trimmed = snippet.trim();
+    lines.push(escapeHTML(trimmed.length > 140 ? trimmed.slice(0, 140) + '...' : trimmed));
+  }
+  if (!lines.length) return '';
+  return `<div class="phc-name">${escapeHTML(arch.name)}</div>` +
+    lines.map(l => `<div class="phc-line">${l}</div>`).join('');
+}
+
+function openSubclassPopup(arch, archetypes, subtypeLabel) {
+  if (!arch) return;
+  $('#preset-popup-title').textContent = arch.name;
+  $('#preset-popup-content').innerHTML = arch.desc
+    ? `<div class="spell-detail-desc">${renderMarkdown(arch.desc)}</div>`
+    : '<p class="srd-hint">No description available.</p>';
+  const alreadySet = character.subclassSlug === arch.slug;
+  const btnLabel   = alreadySet ? 'Already set' : `Set ${escapeHTML(arch.name)}`;
+  setPresetPopupFooter(null, `<button class="btn btn-sm subclass-popup-apply"${alreadySet ? ' disabled' : ''}>${btnLabel}</button>`);
+  $('#preset-popup-overlay').classList.remove('hidden');
+  $('#preset-popup-footer').querySelector('.subclass-popup-apply')?.addEventListener('click', () => {
+    pickSubclass(arch.slug, archetypes, subtypeLabel);
+    $('#preset-popup-overlay').classList.add('hidden');
+  });
+}
+
+function pickSubclass(val, archetypes, subtypeLabel) {
+  clearSubclassSkillGrants();
+  if (val === '__custom__') {
+    character.subclassSlug = '';
+    const name = prompt('Custom subclass name:', character.subclass || '');
+    character.subclass = name || '';
+  } else if (val === '') {
+    character.subclassSlug = '';
+    character.subclass = '';
+  } else {
+    const a = archetypes.find(x => x.slug === val);
+    if (a) {
+      character.subclassSlug = a.slug;
+      character.subclass = a.name;
+      const granted = applyUnlockedSubclassGrants();
+      if (granted.length) {
+        const names = granted.map(k => allSkills().find(s => s.key === k)?.name || k).join(', ');
+        toast(`${a.name} applied — ${names} auto-set`);
       } else {
-        const a = archetypes.find(x => x.slug === val);
-        if (a) {
-          character.subclassSlug = a.slug;
-          character.subclass = a.name;
-          const granted = applyUnlockedSubclassGrants();
-          if (granted.length) {
-            const names = granted.map(k => allSkills().find(s => s.key === k)?.name || k).join(', ');
-            toast(`${a.name} applied — ${names} auto-set`);
-          } else {
-            toast(`${a.name} applied`);
-          }
-        }
+        toast(`${a.name} applied`);
       }
-      applySubclassPools();   // add/remove pools from supplement (e.g. Battle Master Superiority Dice)
-      renderAll();
-      persist();
+    }
+  }
+  applySubclassPools();
+  renderAll();
+  persist();
+}
+
+function buildSubclassDropdown(archetypes, subtypeLabel) {
+  const host = $('#subclass-dd-host');
+  if (!host) return;
+
+  // Clean up body-level panel from any previous render
+  $('#subclass-ddp')?.remove();
+
+  // Current selection label
+  const currentArch = archetypes.find(a => a.slug === character.subclassSlug);
+  const displayName = character.subclassSlug === '__custom__'
+    ? (character.subclass || 'Custom')
+    : (currentArch ? currentArch.name : `— ${subtypeLabel} —`);
+
+  // Trigger wrapper
+  const dd = document.createElement('div');
+  dd.className = 'preset-dropdown';
+  dd.id = 'subclass-dd';
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'preset-dd-trigger';
+  btn.innerHTML = `<span class="preset-dd-value">${escapeHTML(displayName)}</span><span class="preset-dd-caret">▾</span>`;
+  dd.appendChild(btn);
+  host.appendChild(dd);
+
+  // Body-level panel
+  const panel = document.createElement('div');
+  panel.className = 'preset-dd-panel hidden';
+  panel.id = 'subclass-ddp';
+  panel.setAttribute('role', 'listbox');
+
+  const search = document.createElement('input');
+  search.type        = 'text';
+  search.className   = 'preset-dd-search';
+  search.placeholder = 'Search…';
+
+  const listEl = document.createElement('div');
+  listEl.className = 'preset-dd-list';
+
+  panel.appendChild(search);
+  panel.appendChild(listEl);
+  document.body.appendChild(panel);
+
+  function populateList(q) {
+    listEl.innerHTML = '';
+    const qLc = (q || '').toLowerCase().trim();
+
+    // Special entries: none + custom (always at top, unaffected by source grouping)
+    [{ val: '', label: `— ${subtypeLabel} —` }, { val: '__custom__', label: 'Custom…' }]
+      .forEach(({ val, label }) => {
+        if (qLc && !label.toLowerCase().includes(qLc)) return;
+        const opt = document.createElement('div');
+        opt.className   = 'preset-dd-option';
+        opt.setAttribute('role', 'option');
+        opt.textContent = label;
+        opt.tabIndex    = -1;
+        opt.addEventListener('click', e => { e.stopPropagation(); closeSubclassDropdown(); pickSubclass(val, archetypes, subtypeLabel); });
+        listEl.appendChild(opt);
+      });
+
+    // Group by source slug (supplement entries use a synthetic key)
+    const grouped = {};
+    archetypes.forEach(arch => {
+      const k = arch._fromSupplement
+        ? ('_supp_' + (arch._supplementMeta?.sourceLabel || 'Custom'))
+        : (arch.document__slug || 'other');
+      (grouped[k] ||= []).push(arch);
     });
+
+    const keys = Object.keys(grouped).sort((a, b) => {
+      const ai = SOURCE_ORDER.indexOf(a), bi = SOURCE_ORDER.indexOf(b);
+      return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+    });
+
+    keys.forEach(k => {
+      const sorted = grouped[k].slice().sort((a, b) => a.name.localeCompare(b.name));
+
+      // Filter within group
+      const visible = sorted.filter(arch => {
+        if (!qLc) return true;
+        const tag = arch._fromSupplement
+          ? (arch._supplementMeta?.sourceLabel || 'Custom')
+          : sourceTag(arch.document__slug);
+        const label = arch.name + (tag ? ` [${tag}]` : '');
+        return label.toLowerCase().includes(qLc);
+      });
+      if (!visible.length) return;
+
+      // Separator — emit for every group (special entries are always above)
+      const sep = document.createElement('div');
+      sep.className   = 'preset-dd-sep';
+      const groupLabel = k.startsWith('_supp_')
+        ? k.slice(6)
+        : (sourceTag(k) || k);
+      sep.textContent = `── ${groupLabel} ──`;
+      listEl.appendChild(sep);
+
+      visible.forEach(arch => {
+        const tag = arch._fromSupplement
+          ? (arch._supplementMeta?.sourceLabel || 'Custom')
+          : sourceTag(arch.document__slug);
+        const label = arch.name + (tag ? ` [${tag}]` : '');
+
+        const opt = document.createElement('div');
+        opt.className   = 'preset-dd-option' + (arch.slug === character.subclassSlug ? ' active' : '');
+        opt.setAttribute('role', 'option');
+        opt.dataset.label = label;
+        opt.textContent   = label;
+        opt.tabIndex      = -1;
+
+        opt.addEventListener('pointerenter', e => {
+          if (e.pointerType !== 'mouse') return;
+          const html = renderSubclassHoverContent(arch);
+          if (html) showPresetHoverCard(html, opt.getBoundingClientRect(), 'right');
+        });
+        opt.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hidePresetHoverCard(); });
+
+        opt.addEventListener('contextmenu', e => {
+          e.preventDefault();
+          e.stopPropagation();
+          closeSubclassDropdown();
+          openSubclassPopup(arch, archetypes, subtypeLabel);
+        });
+
+        opt.addEventListener('click', e => {
+          e.stopPropagation();
+          closeSubclassDropdown();
+          pickSubclass(arch.slug, archetypes, subtypeLabel);
+        });
+
+        listEl.appendChild(opt);
+      });
+    });
+  }
+
+  function openSubclassDd() {
+    hidePresetHoverCard();
+    closeAllDropdowns();
+    _subclassDdOpen = true;
+    positionSubclassPanel();
+    panel.classList.remove('hidden');
+    btn.querySelector('.preset-dd-caret').textContent = '▴';
+    search.value = '';
+    populateList('');
+    setTimeout(() => search.focus(), 0);
+  }
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    _subclassDdOpen ? closeSubclassDropdown() : openSubclassDd();
+  });
+
+  btn.addEventListener('pointerenter', e => {
+    if (e.pointerType !== 'mouse') return;
+    const arch = archetypes.find(a => a.slug === character.subclassSlug);
+    if (!arch) return;
+    const html = renderSubclassHoverContent(arch);
+    if (html) showPresetHoverCard(html, btn.getBoundingClientRect(), 'below');
+  });
+  btn.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hidePresetHoverCard(); });
+
+  search.addEventListener('input', () => populateList(search.value));
+  search.addEventListener('keydown', e => {
+    if (e.key === 'Escape')    { e.preventDefault(); closeSubclassDropdown(); btn.focus(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); listEl.querySelector('.preset-dd-option')?.focus(); }
+  });
+
+  // Global listeners — added once for the lifetime of the page
+  if (!_subclassGlobalListenerAdded) {
+    _subclassGlobalListenerAdded = true;
+    document.addEventListener('click', () => closeSubclassDropdown());
+    document.addEventListener('scroll', e => {
+      if (!_subclassDdOpen) return;
+      const p = $('#subclass-ddp');
+      if (p && e.target instanceof Node && p.contains(e.target)) return;
+      positionSubclassPanel();
+    }, { passive: true, capture: true });
+    window.addEventListener('resize', () => { if (_subclassDdOpen) positionSubclassPanel(); });
+  }
+
+  // Lock if API still loading
+  if ($('#api-loading') && !$('#api-loading').classList.contains('hidden')) {
+    btn.disabled = true;
+    btn.classList.add('api-locked');
   }
 }
 
@@ -3458,7 +3751,13 @@ function renderClassFeatures() {
 const STORAGE_KEY = 'dnd5e-character-current';
 
 function persist() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(character)); } catch (e) {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(character));
+  } catch (e) {
+    if (e && e.name === 'QuotaExceededError') {
+      toast('Storage full - character not saved! Export your character or clear browser data.');
+    }
+  }
 }
 function restore() {
   try {
@@ -3631,7 +3930,7 @@ function wireToolbar() {
   });
 
   $('#btn-add-attack').addEventListener('click', () => {
-    character.attacks.push({ name: '', bonus: '', damage: '', notes: '' });
+    character.attacks.push({ name: '', bonus: '', damage: '' });
     renderAttacks();
   });
   $('#btn-add-spell').addEventListener('click', () => {
@@ -3875,7 +4174,7 @@ function addSrdToCharacter(item) {
       const pb = proficiencyBonus(character.level);
       const bonus = fmtMod(mod + pb); // assumes proficient — user can edit
       const dmg = `${item.damage_dice || ''}${mod >= 0 ? '+' : ''}${mod} ${item.damage_type || ''}`.trim();
-      character.attacks.push({ name: item.name, bonus, damage: dmg, notes: '' });
+      character.attacks.push({ name: item.name, bonus, damage: dmg });
       renderAttacks();
       toast('Added attack: ' + item.name);
       break;
@@ -3889,14 +4188,22 @@ function addSrdToCharacter(item) {
       break;
     }
     case 'classes': {
-      character.class = item.name;
-      applyBindingsToInputs();
+      if ((presetCache.class || []).find(c => c.slug === item.slug)) {
+        applyClass(item.slug);
+      } else {
+        character.class = item.name;
+        applyBindingsToInputs();
+      }
       toast('Set class: ' + item.name);
       break;
     }
     case 'races': {
-      character.race = item.name;
-      applyBindingsToInputs();
+      if ((presetCache.race || []).find(r => r.slug === item.slug)) {
+        applyRace(item.slug);
+      } else {
+        character.race = item.name;
+        applyBindingsToInputs();
+      }
       toast('Set race: ' + item.name);
       break;
     }
@@ -5018,9 +5325,9 @@ function preFillPresetDropdowns(presets = ['class', 'race', 'background']) {
 function setApiLoading(on) {
   const el = $('#api-loading');
   if (el) el.classList.toggle('hidden', !on);
-  // Lock the custom dropdown trigger buttons while the API is in-flight so
-  // the player can't interact with an incomplete list.  The native <select>
-  // elements are hidden but also disabled for consistency.
+  // Lock all custom dropdown trigger buttons while the API is in-flight so
+  // the player can't interact with an incomplete list.
+  // Preset selects (hidden but present for a11y)
   ['class', 'race', 'background'].forEach(preset => {
     const btn = $(`#preset-dd-${preset} .preset-dd-trigger`);
     if (btn) {
@@ -5029,6 +5336,26 @@ function setApiLoading(on) {
     }
     const sel = $(`select[data-preset="${preset}"]`);
     if (sel) sel.disabled = !!on;
+  });
+  // Feat dropdown
+  const featBtn = $('#feat-dd .preset-dd-trigger');
+  if (featBtn) {
+    featBtn.disabled = !!on;
+    featBtn.classList.toggle('api-locked', !!on);
+  }
+  // Subclass dropdown (rebuilt on each renderClassFeatures call; lock via class check in buildSubclassDropdown)
+  const subBtn = $('#subclass-dd .preset-dd-trigger');
+  if (subBtn) {
+    subBtn.disabled = !!on;
+    subBtn.classList.toggle('api-locked', !!on);
+  }
+  // Armor / shield / magic-armor slot dropdowns
+  ARMOR_SLOTS.forEach(slotKey => {
+    const btn = $(`.armor-dd[data-slot="${slotKey}"] .preset-dd-trigger`);
+    if (btn) {
+      btn.disabled = !!on;
+      btn.classList.toggle('api-locked', !!on);
+    }
   });
 }
 
@@ -5362,7 +5689,7 @@ async function loadPresets() {
 
   // Phase 1: v1 classes — render Class Features immediately when ready.
   const cls = await clsP;
-  if (cls && cls.results) {
+  if (cls && cls.results && cls.results.length) {
     presetCache.class = cls.results;
     if (character.classSlug) {
       renderClassFeatures();
@@ -5375,7 +5702,7 @@ async function loadPresets() {
 
   // Append normalized v2 base classes (non-srd-2014) to the class preset list.
   // srd-2014 base classes are already covered by the v1 fetch above.
-  if (cls2 && cls2.results) {
+  if (cls2 && cls2.results && cls2.results.length) {
     const allV2 = cls2.results;
     const v2Extras = allV2
       .filter(r => !r.subclass_of && (r.document || {}).key !== 'srd-2014')
@@ -5388,12 +5715,12 @@ async function loadPresets() {
     }
   }
 
-  if (rac    && rac.results)    presetCache.race       = rac.results;
-  if (bg     && bg.results)     presetCache.background = bg.results.map(normalizeV2Background);
-  if (feats  && feats.results)  presetCache.feats      = feats.results;
-  if (spells && spells.results) presetCache.spells     = spells.results;
-  if (armor  && armor.results)  presetCache.armor      = armor.results;
-  if (mi     && mi.results)     presetCache.magicitems = mi.results.filter(isMagicACItem);
+  if (rac    && rac.results    && rac.results.length)    presetCache.race       = rac.results;
+  if (bg     && bg.results     && bg.results.length)     presetCache.background = bg.results.map(normalizeV2Background);
+  if (feats  && feats.results  && feats.results.length)  presetCache.feats      = feats.results;
+  if (spells && spells.results && spells.results.length) presetCache.spells     = spells.results;
+  if (armor  && armor.results  && armor.results.length)  presetCache.armor      = armor.results;
+  if (mi     && mi.results     && mi.results.length)     presetCache.magicitems = mi.results.filter(isMagicACItem);
 
   // Determine which of the three critical presets failed to load.
   const failedPresets = [
@@ -5508,7 +5835,7 @@ const SOURCE_TAGS = {
   'srd-2024':   'SRD 2024',
   'toh':        'ToH',         // Tome of Heroes (Kobold Press)
   'a5e':        'A5E',         // Level Up: Advanced 5e
-  'taldorei':   'Tal\u2019Dorei',
+  'taldorei':   "Tal'Dorei",
   'o5e':        'Open5e',
   'kp':         'Kobold',
   'blackflag':  'BlackFlag',
@@ -5575,13 +5902,113 @@ function populatePresetSelects() {
 
 const SOURCE_ORDER = ['wotc-srd', 'srd-2024', 'blackflag', 'o5e', 'a5e', 'toh', 'kp', 'taldorei'];
 
+// ── Source filter ─────────────────────────────────────────────────────────────
+// Stored in localStorage as a JSON array of enabled slug strings.
+// Absent/null = all sources enabled (default state).
+const SOURCE_FILTER_KEY = 'dnd5char_source_filters';
+
+/** One entry per filterable source. Order matches the Info-pane checkbox list. */
+const SOURCE_FILTER_DEFS = [
+  { slug: 'wotc-srd',  label: 'SRD 2014 (WotC)'          },
+  { slug: 'srd-2024',  label: 'SRD 2024 (WotC)'          },
+  { slug: 'a5e',       label: 'Level Up: A5E (EN Pub)'    },
+  { slug: 'blackflag', label: 'Black Flag (Kobold Press)' },
+  { slug: 'toh',       label: 'Tome of Heroes (Kobold)'   },
+  { slug: 'kp',        label: 'Kobold Press'              },
+  { slug: 'taldorei',  label: "Tal'Dorei (Darrington)"    },
+  { slug: 'o5e',       label: 'Open5e Original'           },
+];
+
+/**
+ * Returns a Set of enabled source slugs, or null if no filter is set
+ * (meaning all sources are considered enabled).
+ */
+function getEnabledSources() {
+  try {
+    const raw = localStorage.getItem(SOURCE_FILTER_KEY);
+    if (!raw) return null;
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return null;
+    return new Set(arr);
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Persists the enabled-source set to localStorage.
+ * Pass null to clear the filter (all sources enabled).
+ */
+function setEnabledSources(enabledSet) {
+  if (!enabledSet) {
+    localStorage.removeItem(SOURCE_FILTER_KEY);
+    return;
+  }
+  localStorage.setItem(SOURCE_FILTER_KEY, JSON.stringify([...enabledSet]));
+}
+
+/**
+ * Returns true if content from the given source key should appear in dropdowns.
+ * Accepts either a raw v2 API document key ('srd-2014', 'a5e-ag') or an
+ * internal v1-style slug ('wotc-srd', 'a5e'). Supplement / custom content is
+ * always shown regardless of filter state.
+ */
+function isSourceEnabled(rawKey) {
+  if (!rawKey || rawKey === 'supplement' || rawKey === 'custom') return true;
+  const enabled = getEnabledSources();
+  if (!enabled) return true;           // no filter stored = all enabled
+  const slug = v2DocKeyToDocSlug(rawKey);  // normalise v2 key → internal slug
+  return enabled.has(slug);
+}
+
+/**
+ * Reads checkbox states from the DOM and persists them, then re-populates all
+ * source-filtered dropdowns. Called by each source-filter checkbox on change.
+ */
+function applySourceFilters() {
+  const checked = SOURCE_FILTER_DEFS
+    .filter(d => { const c = $(`#sf-${d.slug}`); return c && c.checked; })
+    .map(d => d.slug);
+  // If all sources are checked, remove the filter entirely (cleaner default state)
+  if (checked.length === SOURCE_FILTER_DEFS.length) {
+    setEnabledSources(null);
+  } else {
+    setEnabledSources(new Set(checked));
+  }
+  populatePresetDropdowns();   // custom dropdown lists (class / race / background)
+  populateArmorDropdowns();    // armor / magic-item slot dropdowns
+  populateFeatPicker();        // feat custom dropdown list
+  renderClassFeatures();       // subclass picker inside class features panel
+}
+
+/** Syncs Info-pane checkboxes to reflect the current localStorage filter state. */
+function syncSourceFilterUI() {
+  const enabled = getEnabledSources();   // null = all on
+  SOURCE_FILTER_DEFS.forEach(def => {
+    const cb = $(`#sf-${def.slug}`);
+    if (cb) cb.checked = (!enabled || enabled.has(def.slug));
+  });
+}
+
+/** Wires change events on every source-filter checkbox. */
+function wireSourceFilters() {
+  SOURCE_FILTER_DEFS.forEach(def => {
+    const cb = $(`#sf-${def.slug}`);
+    if (cb) cb.addEventListener('change', applySourceFilters);
+  });
+}
+// ── end source filter ─────────────────────────────────────────────────────────
+
 const PRESET_PLACEHOLDER = { class: 'Pick a Class…', race: 'Pick a Race…', background: 'Pick a Background…' };
 
 function populateSourced(preset, items, addOptionFn) {
   const sel = $(`select[data-preset="${preset}"]`);
   sel.innerHTML = `<option value="">${PRESET_PLACEHOLDER[preset] || '— pick or type custom —'}</option>`;
+  const currentSlug = character[preset + 'Slug'] || '';
   const grouped = {};
   items.forEach(i => {
+    // Always include the currently-selected item even when its source is filtered out
+    if (!isSourceEnabled(i.document__slug) && i.slug !== currentSlug) return;
     const k = i.document__slug || 'other';
     (grouped[k] ||= []).push(i);
   });
@@ -7037,6 +7464,11 @@ function buildFeatDesc(feat) {
 
 function addFeatToCharacter(feat) {
   character.feats = character.feats || [];
+  // Guard: prevent double-adding the same non-custom feat (also prevents speed-bonus double-count)
+  if (!feat.custom && feat.slug && (character.feats).some(f => f.slug === feat.slug && !f.custom)) {
+    toast(`${feat.name} already added`);
+    return;
+  }
   const { fixed, choices, speedBonus, initiativeBonus } = parseFeatEffects(feat);
   const newFeat = {
     name:            feat.name,
@@ -7192,11 +7624,16 @@ function renderFeats() {
 }
 
 function populateFeatPicker() {
-  const sel = $('#feat-picker');
-  if (!sel) return;
-  while (sel.options.length > 1) sel.remove(1);
+  const panel = $('#feat-ddp');
+  if (!panel) return;
+  const list = panel.querySelector('.preset-dd-list');
+  if (!list) return;
+  list.innerHTML = '';
+  // Slugs already on the character — keep them visible even if their source is filtered
+  const activeSlugs = new Set((character.feats || []).map(f => f.slug).filter(Boolean));
   const grouped = {};
   (presetCache.feats || []).forEach(f => {
+    if (!isSourceEnabled(f.document__slug) && !activeSlugs.has(f.slug)) return;
     const k = f.document__slug || 'other';
     (grouped[k] ||= []).push(f);
   });
@@ -7206,37 +7643,18 @@ function populateFeatPicker() {
   });
   keys.forEach((k, idx) => {
     if (idx > 0) {
-      const sep = document.createElement('option');
-      sep.disabled = true;
-      sep.textContent = `──── ${sourceTag(k) || k} ────`;
-      sel.appendChild(sep);
+      const sep = document.createElement('div');
+      sep.className   = 'preset-dd-sep';
+      sep.textContent = `── ${sourceTag(k) || k} ──`;
+      list.appendChild(sep);
     }
     grouped[k].sort((a, b) => a.name.localeCompare(b.name)).forEach(f => {
-      const o = document.createElement('option');
-      o.value = f.slug;
-      o.textContent = f.name + (f.prerequisite ? ' *' : '');
-      if (f.prerequisite) o.title = `Prerequisite: ${f.prerequisite}`;
-      sel.appendChild(o);
+      list.appendChild(makeFeatDdOption(f));
     });
   });
 }
 
 function wireFeatPicker() {
-  const addBtn = $('#btn-add-feat');
-  if (addBtn) {
-    addBtn.addEventListener('click', () => {
-      const sel = $('#feat-picker');
-      if (!sel || !sel.value) return;
-      const feat = (presetCache.feats || []).find(f => f.slug === sel.value);
-      if (!feat) return;
-      if ((character.feats || []).some(f => f.slug === feat.slug && !f.custom)) {
-        toast(`${feat.name} already added`);
-        return;
-      }
-      addFeatToCharacter(feat);
-      sel.value = '';
-    });
-  }
   const customBtn = $('#btn-add-custom-feat');
   if (customBtn) {
     customBtn.addEventListener('click', () => {
@@ -7247,6 +7665,266 @@ function wireFeatPicker() {
       renderFeats(); persist();
     });
   }
+}
+
+// ====================================================================
+// Feat custom dropdown  (mirrors Class/Race/Background pattern)
+// ====================================================================
+
+let _featDdOpen = false;
+
+function buildFeatDropdown() {
+  const sel = $('#feat-picker');
+  if (!sel || $('#feat-dd')) return;
+  sel.style.display = 'none';   // keep in DOM; hidden by JS like preset selects
+
+  // Trigger button
+  const dd = document.createElement('div');
+  dd.className = 'preset-dropdown';
+  dd.id        = 'feat-dd';
+
+  const btn = document.createElement('button');
+  btn.type      = 'button';
+  btn.className = 'preset-dd-trigger';
+  btn.innerHTML = '<span class="preset-dd-value">— add a feat —</span><span class="preset-dd-caret">▾</span>';
+  dd.appendChild(btn);
+  sel.insertAdjacentElement('afterend', dd);
+
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    _featDdOpen ? closeFeatDropdown() : openFeatDropdown();
+  });
+
+  // Panel — appended to body to avoid clipping
+  const panel = document.createElement('div');
+  panel.className = 'preset-dd-panel hidden';
+  panel.id        = 'feat-ddp';
+  panel.setAttribute('role', 'listbox');
+
+  const search = document.createElement('input');
+  search.type        = 'text';
+  search.className   = 'preset-dd-search';
+  search.placeholder = 'Search feats...';
+
+  const list = document.createElement('div');
+  list.className = 'preset-dd-list';
+
+  panel.appendChild(search);
+  panel.appendChild(list);
+  document.body.appendChild(panel);
+
+  search.addEventListener('input', () => filterFeatDropdown());
+  search.addEventListener('keydown', e => {
+    if (e.key === 'Escape')    { e.preventDefault(); closeFeatDropdown(); btn.focus(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); focusFeatDdItem(null, 1); }
+  });
+
+  // Close on outside click; reposition on scroll
+  document.addEventListener('click', () => closeFeatDropdown());
+  document.addEventListener('scroll', e => {
+    if (!_featDdOpen) return;
+    const p = $('#feat-ddp');
+    if (p && e.target instanceof Node && p.contains(e.target)) return;
+    positionFeatPanel();
+  }, { passive: true, capture: true });
+  window.addEventListener('resize', () => { if (_featDdOpen) positionFeatPanel(); });
+}
+
+function positionFeatPanel() {
+  const dd    = $('#feat-dd');
+  const panel = $('#feat-ddp');
+  if (!dd || !panel) return;
+  const rect = dd.getBoundingClientRect();
+  if (rect.bottom < 0 || rect.top > window.innerHeight) { closeFeatDropdown(); return; }
+  panel.style.minWidth = Math.max(rect.width, 240) + 'px';
+  panel.style.left     = rect.left + 'px';
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  if (spaceBelow >= 120) {
+    panel.style.top       = (rect.bottom + 2) + 'px';
+    panel.style.bottom    = 'auto';
+    panel.style.maxHeight = Math.min(spaceBelow, 340) + 'px';
+  } else {
+    panel.style.bottom    = (window.innerHeight - rect.top + 2) + 'px';
+    panel.style.top       = 'auto';
+    panel.style.maxHeight = Math.min(spaceAbove, 340) + 'px';
+  }
+}
+
+function openFeatDropdown() {
+  hidePresetHoverCard();
+  closeAllDropdowns();
+  _featDdOpen = true;
+  const dd    = $('#feat-dd');
+  const panel = $('#feat-ddp');
+  if (!dd || !panel) return;
+  positionFeatPanel();
+  panel.classList.remove('hidden');
+  const caret = dd.querySelector('.preset-dd-caret');
+  if (caret) caret.textContent = '▴';
+  const searchEl = panel.querySelector('.preset-dd-search');
+  if (searchEl) { searchEl.value = ''; filterFeatDropdown(); }
+  setTimeout(() => {
+    searchEl?.focus();
+  }, 0);
+}
+
+function closeFeatDropdown() {
+  if (!_featDdOpen) return;
+  _featDdOpen = false;
+  const panel = $('#feat-ddp');
+  const dd    = $('#feat-dd');
+  if (panel) panel.classList.add('hidden');
+  const caret = dd?.querySelector('.preset-dd-caret');
+  if (caret) caret.textContent = '▾';
+  hidePresetHoverCard();
+}
+
+function filterFeatDropdown() {
+  const panel = $('#feat-ddp');
+  if (!panel) return;
+  const q = (panel.querySelector('.preset-dd-search')?.value || '').toLowerCase().trim();
+  panel.querySelectorAll('.preset-dd-option').forEach(opt => {
+    const hit = !q || (opt.dataset.label || '').toLowerCase().includes(q);
+    opt.classList.toggle('dd-hidden', !hit);
+  });
+  panel.querySelectorAll('.preset-dd-sep').forEach(sep => {
+    let el  = sep.nextElementSibling;
+    let any = false;
+    while (el && !el.classList.contains('preset-dd-sep')) {
+      if (el.classList.contains('preset-dd-option') && !el.classList.contains('dd-hidden')) { any = true; break; }
+      el = el.nextElementSibling;
+    }
+    sep.classList.toggle('dd-hidden', !any);
+  });
+}
+
+function focusFeatDdItem(fromEl, dir) {
+  const panel = $('#feat-ddp');
+  if (!panel) return;
+  const items = [...panel.querySelectorAll('.preset-dd-option:not(.dd-hidden)')];
+  if (!items.length) return;
+  const idx = fromEl ? items.indexOf(fromEl) : (dir > 0 ? -1 : items.length);
+  items[Math.max(0, Math.min(items.length - 1, idx + dir))]?.focus();
+}
+
+/** Render hover-card HTML for a feat (key facts only). */
+function renderFeatHoverContent(feat) {
+  let html = `<div class="phc-name">${escapeHTML(feat.name)}</div>`;
+  if (feat.prerequisite) {
+    html += `<div class="phc-line"><b>Prereq:</b> ${escapeHTML(feat.prerequisite)}</div>`;
+  }
+  const intro = String(feat.desc || '').trim();
+  if (intro) {
+    const snippet = intro.length > 150 ? intro.slice(0, 147) + '...' : intro;
+    html += `<div class="phc-line">${escapeHTML(snippet)}</div>`;
+  }
+  return html;
+}
+
+/** Full popup HTML for a feat (body only — link/button go in the sticky footer). */
+function renderFeatPopupContent(feat) {
+  let html = '';
+  if (feat.prerequisite) {
+    html += `<div class="spell-detail-line"><b>Prerequisite:</b> ${escapeHTML(feat.prerequisite)}</div>`;
+  }
+  const tag = sourceTag(feat.document__slug);
+  if (tag) {
+    html += `<div class="spell-detail-line"><b>Source:</b> ${escapeHTML(tag)}</div>`;
+  }
+  if (feat.desc) {
+    html += `<div class="spell-detail-desc">${renderMarkdown(feat.desc)}</div>`;
+  }
+  const effects = (feat.effects_desc || []).filter(Boolean);
+  if (effects.length) {
+    html += '<ul class="feat-popup-effects">' +
+      effects.map(e => `<li>${escapeHTML(String(e))}</li>`).join('') +
+      '</ul>';
+  }
+  return html;
+}
+
+/** Open the detail popup for a feat by slug. */
+function openFeatPopup(slug) {
+  const feat = (presetCache.feats || []).find(f => f.slug === slug);
+  if (!feat) { toast('Feat data not loaded'); return; }
+  $('#preset-popup-title').textContent = feat.name;
+  $('#preset-popup-content').innerHTML = renderFeatPopupContent(feat);
+  const alreadyAdded = (character.feats || []).some(f => f.slug === feat.slug && !f.custom);
+  const prefix   = docSlugToUrlPrefix(feat.document__slug);
+  const url      = `https://open5e.com/feats/${encodeURIComponent(prefix + '_' + feat.slug)}`;
+  const btnLabel = alreadyAdded ? 'Already added' : 'Add Feat';
+  setPresetPopupFooter(url, `<button class="btn btn-sm feat-popup-add"${alreadyAdded ? ' disabled' : ''}>${btnLabel}</button>`);
+  $('#preset-popup-overlay').classList.remove('hidden');
+  $('#preset-popup-footer').querySelector('.feat-popup-add')?.addEventListener('click', () => {
+    if ((character.feats || []).some(f => f.slug === feat.slug && !f.custom)) {
+      toast(`${feat.name} already added`);
+      return;
+    }
+    addFeatToCharacter(feat);
+    // Reset trigger label
+    const val = $('#feat-dd .preset-dd-value');
+    if (val) val.textContent = '— add a feat —';
+    $('#preset-popup-overlay').classList.add('hidden');
+  });
+}
+
+/** Create one row in the feat dropdown list. */
+function makeFeatDdOption(feat) {
+  const opt = document.createElement('div');
+  opt.className     = 'preset-dd-option';
+  opt.dataset.slug  = feat.slug;
+  opt.dataset.label = feat.name;  // used by search filter
+  opt.tabIndex      = -1;
+  opt.setAttribute('role', 'option');
+
+  const tag   = sourceTag(feat.document__slug);
+  const label = feat.name + (tag ? ` [${tag}]` : '') + (feat.prerequisite ? ' *' : '');
+  opt.textContent = label;
+  if (feat.prerequisite) opt.title = `Prerequisite: ${feat.prerequisite}`;
+
+  // Click → add immediately (if not already added)
+  opt.addEventListener('click', e => {
+    e.stopPropagation();
+    closeFeatDropdown();
+    if ((character.feats || []).some(f => f.slug === feat.slug && !f.custom)) {
+      toast(`${feat.name} already added`);
+      return;
+    }
+    addFeatToCharacter(feat);
+    const val = $('#feat-dd .preset-dd-value');
+    if (val) val.textContent = '— add a feat —';
+  });
+
+  // Keyboard navigation
+  opt.addEventListener('keydown', e => {
+    if (e.key === 'Enter')     { e.preventDefault(); opt.click(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); focusFeatDdItem(opt,  1); }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); focusFeatDdItem(opt, -1); }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeFeatDropdown();
+      $('#feat-dd .preset-dd-trigger')?.focus();
+    }
+  });
+
+  // Hover → quick summary card (mouse only)
+  opt.addEventListener('pointerenter', e => {
+    if (e.pointerType !== 'mouse') return;
+    const html = renderFeatHoverContent(feat);
+    if (html) showPresetHoverCard(html, opt.getBoundingClientRect(), 'right');
+  });
+  opt.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hidePresetHoverCard(); });
+
+  // Right-click → detail popup
+  opt.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeFeatDropdown();
+    openFeatPopup(feat.slug);
+  });
+
+  return opt;
 }
 
 // ====================================================================
@@ -7267,30 +7945,53 @@ function renderMarkdown(text) {
   const lines = s.split('\n');
   const out = [];
   let inList = false;
-  const closeList = () => { if (inList) { out.push('</ul>'); inList = false; } };
+  let inOList = false;
+  let inBlockquote = false;
+  const closeList       = () => { if (inList)       { out.push('</ul>');         inList       = false; } };
+  const closeOList      = () => { if (inOList)      { out.push('</ol>');         inOList      = false; } };
+  const closeBlockquote = () => { if (inBlockquote) { out.push('</blockquote>'); inBlockquote = false; } };
+  const closeAll        = () => { closeList(); closeOList(); closeBlockquote(); };
 
   for (const raw of lines) {
     const line = raw.trimEnd();
     const trimmed = line.trim();
 
-    if (!trimmed) { closeList(); out.push(''); continue; }
+    if (!trimmed) { closeAll(); out.push(''); continue; }
 
     let m;
     // Legacy app format: "--- text ---" (used by SRD auto-fill); also matches plain markdown headers
-    if ((m = trimmed.match(/^---+\s+(.+?)\s+---+$/))) { closeList(); out.push(`<h3>${m[1]}</h3>`); continue; }
-    if ((m = trimmed.match(/^###\s+(.+)$/)))          { closeList(); out.push(`<h3>${m[1]}</h3>`); continue; }
-    if ((m = trimmed.match(/^##\s+(.+)$/)))           { closeList(); out.push(`<h2>${m[1]}</h2>`); continue; }
-    if ((m = trimmed.match(/^#\s+(.+)$/)))            { closeList(); out.push(`<h1>${m[1]}</h1>`); continue; }
-    if (/^---+\s*$/.test(trimmed))                    { closeList(); out.push('<hr>'); continue; }
+    if ((m = trimmed.match(/^---+\s+(.+?)\s+---+$/))) { closeAll(); out.push(`<h3>${m[1]}</h3>`); continue; }
+    if ((m = trimmed.match(/^#####\s+(.+)$/)))        { closeAll(); out.push(`<h5>${m[1]}</h5>`); continue; }
+    if ((m = trimmed.match(/^####\s+(.+)$/)))         { closeAll(); out.push(`<h4>${m[1]}</h4>`); continue; }
+    if ((m = trimmed.match(/^###\s+(.+)$/)))          { closeAll(); out.push(`<h3>${m[1]}</h3>`); continue; }
+    if ((m = trimmed.match(/^##\s+(.+)$/)))           { closeAll(); out.push(`<h2>${m[1]}</h2>`); continue; }
+    if ((m = trimmed.match(/^#\s+(.+)$/)))            { closeAll(); out.push(`<h1>${m[1]}</h1>`); continue; }
+    if (/^---+\s*$/.test(trimmed))                    { closeAll(); out.push('<hr>'); continue; }
+    // Blockquotes: '>' was escaped to '&gt;' in step 1
+    if ((m = trimmed.match(/^&gt;\s*(.*)/))) {
+      closeList(); closeOList();
+      if (!inBlockquote) { out.push('<blockquote>'); inBlockquote = true; }
+      out.push(m[1]);
+      continue;
+    }
+    // Unordered list
     if ((m = trimmed.match(/^[-*]\s+(.+)$/))) {
+      closeOList(); closeBlockquote();
       if (!inList) { out.push('<ul>'); inList = true; }
       out.push(`<li>${m[1]}</li>`);
       continue;
     }
-    closeList();
+    // Ordered list
+    if ((m = trimmed.match(/^\d+\.\s+(.+)$/))) {
+      closeList(); closeBlockquote();
+      if (!inOList) { out.push('<ol>'); inOList = true; }
+      out.push(`<li>${m[1]}</li>`);
+      continue;
+    }
+    closeAll();
     out.push(line);
   }
-  closeList();
+  closeAll();
 
   // 3. Group consecutive non-block lines into <p> with <br> for inner breaks
   const blocks = [];
@@ -7300,7 +8001,7 @@ function renderMarkdown(text) {
   };
   for (const ln of out) {
     if (ln === '') { flush(); continue; }
-    if (/^<(h[1-6]|hr|ul|\/ul|li)/.test(ln.trim())) { flush(); blocks.push(ln); }
+    if (/^<(h[1-6]|hr|ul|\/ul|ol|\/ol|li|blockquote|\/blockquote)/.test(ln.trim())) { flush(); blocks.push(ln); }
     else para.push(ln);
   }
   flush();
@@ -7406,6 +8107,7 @@ function wireInfoButton() {
     renderSupplementSubclassList();
     refreshRaceSupplementStatus();
     renderSupplementRaceList();
+    syncSourceFilterUI();   // keep checkboxes in sync with localStorage
   });
   $('#info-close')?.addEventListener('click', () => overlay.classList.add('hidden'));
   overlay?.addEventListener('click', e => {
@@ -7457,8 +8159,10 @@ function boot() {
   wireSpellsModeToggle();
   wirePresetPreview();
   buildCustomDropdowns();
+  buildFeatDropdown();
   syncPresetDropdowns();    // populate button labels from saved character before API arrives
   buildArmorDropdowns();
+  syncArmorDropdowns();   // restore selected item labels now that triggers exist
   wireGenericSteppers();
   wireInitiative();
   wireAC();
@@ -7467,6 +8171,7 @@ function boot() {
   wireShieldEnhancement();
   wireMarkupToggles();
   wireInfoButton();
+  wireSourceFilters();
   wireThemeSelector();
   loadSubclassSupplement();   // localStorage → _subclassSupplement (merged after loadPresets)
   loadRaceSupplement();       // localStorage → _raceSupplement     (merged after loadPresets)

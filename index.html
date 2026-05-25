@@ -504,7 +504,6 @@
         <div id="feats-list"></div>
         <div class="feat-add-row">
           <select id="feat-picker"><option value="">— add a feat —</option></select>
-          <button class="btn btn-sm" id="btn-add-feat">+ Add</button>
         </div>
         <button class="btn btn-sm" id="btn-add-custom-feat" style="margin-top:4px;width:100%">+ Custom Feat</button>
       </section>
@@ -636,7 +635,7 @@
         <li>Click a spell name's <span class="info-icon">&#x2197;</span> to open its rules (with 2014 / 2024 / A5E tabs when multiple editions exist).</li>
         <li>Ability scores show your <i>base</i> in the small box and the <i>final</i> below the modifier; +R / +L / +F tags break down where each bonus came from.</li>
         <li>Pick a class to auto-populate hit dice, save proficiencies, spellcasting ability, and class-resource pools.</li>
-        <li><b>Offline:</b> the selected class / race / background are cached on the sheet, so class features, spell-slot tables, expected saves, and hit-die deviation keep rendering without a connection. Picking a new class / race / background needs the SRD API to be reachable.</li>
+        <li><b>Offline:</b> if the APIs are unreachable, your selected class / race / background data is stored locally on the sheet, so class features, spell-slot tables, expected saves, and hit-die deviation keep rendering. Picking a new class / race / background requires the SRD API to be reachable.</li>
       </ul>
 
       <h4 class="info-h4">Non-standard highlight</h4>
@@ -692,6 +691,21 @@
         <li><a href="https://open5e.com"                                                target="_blank" rel="noopener">Open5e Original Content</a> <span class="info-source-tag">o5e</span></li>
       </ul>
 
+      <h4 class="info-h4">Source filters</h4>
+      <p>Check or uncheck sources to control which entries appear in the Class, Race, Background, Subclass, Feat, Armor, and Spell dropdowns. Your currently-selected items are always kept visible regardless of filter state.</p>
+      <p class="info-tip">Note: the SRD search panel queries the Open5e API directly and always returns all available content, regardless of filters set here.</p>
+      <div class="source-filter-grid">
+        <label class="source-filter-row"><input type="checkbox" id="sf-wotc-srd">  SRD 2014 (WotC)</label>
+        <label class="source-filter-row"><input type="checkbox" id="sf-srd-2024">  SRD 2024 (WotC)</label>
+        <label class="source-filter-row"><input type="checkbox" id="sf-a5e">       Level Up: A5E (EN Pub)</label>
+        <label class="source-filter-row"><input type="checkbox" id="sf-blackflag"> Black Flag (Kobold Press)</label>
+        <label class="source-filter-row"><input type="checkbox" id="sf-toh">       Tome of Heroes (Kobold)</label>
+        <label class="source-filter-row"><input type="checkbox" id="sf-kp">        Kobold Press</label>
+        <label class="source-filter-row"><input type="checkbox" id="sf-taldorei">  Tal'Dorei (Darrington)</label>
+        <label class="source-filter-row"><input type="checkbox" id="sf-o5e">       Open5e Original</label>
+      </div>
+      <p class="info-tip">If a new source appears in the API before this list is updated, its content will always show (as if checked).</p>
+
       <h4 class="info-h4">Markup formatting</h4>
       <p>Long text fields (Personality, Features &amp; Traits, Proficiencies, Equipment, Notes) have a <b>Raw / Markup</b> toggle next to the heading. In Markup mode the following formatting renders:</p>
 
@@ -746,6 +760,7 @@
       <button id="preset-popup-close" class="icon-btn" aria-label="Close">&times;</button>
     </div>
     <div class="spell-popup-content" id="preset-popup-content"></div>
+    <div class="preset-popup-footer" id="preset-popup-footer"></div>
   </div>
 </div>
 
