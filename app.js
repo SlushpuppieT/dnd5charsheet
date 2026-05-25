@@ -1629,6 +1629,11 @@ function docSlugToUrlPrefix(docSlug) {
 /** open5e.com URL for a preset item (uses v2-style "{prefix}_{slug}" format). */
 function presetOpen5eUrl(preset, item) {
   const paths  = { class: 'classes', race: 'races', background: 'backgrounds' };
+  if (preset === 'background') {
+    // v2 background keys already contain the full prefix (e.g. "a5e-ag_hermit"),
+    // so use the slug directly — no extra prefix concat needed.
+    return `https://open5e.com/backgrounds/${encodeURIComponent(item.slug || '')}`;
+  }
   const prefix = docSlugToUrlPrefix(item.document__slug);
   const baseSl = item._baseSlug || (item.slug || '').split(':')[0];
   return `https://open5e.com/${paths[preset] || preset}/${encodeURIComponent(prefix + '_' + baseSl)}`;
@@ -1648,6 +1653,7 @@ function renderPresetHoverContent(preset, item) {
     if (spd)            lines.push(`Speed: <b>${spd} ft</b>`);
     if (item.languages) lines.push(`Languages: ${escapeHTML(item.languages)}`);
   } else if (preset === 'background') {
+    if (item.asi_desc)            lines.push(`ASI: ${escapeHTML(item.asi_desc)}`);
     if (item.skill_proficiencies) lines.push(`Skills: ${escapeHTML(item.skill_proficiencies)}`);
     if (item.tool_proficiencies)  lines.push(`Tools: ${escapeHTML(item.tool_proficiencies)}`);
     if (item.languages)           lines.push(`Languages: ${escapeHTML(item.languages)}`);
@@ -1676,9 +1682,11 @@ function renderPresetPopupContent(preset, item) {
     if (item.languages) html += `<div class="spell-detail-line"><b>Languages:</b> ${escapeHTML(item.languages)}</div>`;
     if (item.desc)      html += `<div class="spell-detail-desc">${escapeHTML(item.desc)}</div>`;
   } else if (preset === 'background') {
+    if (item.asi_desc)            html += `<div class="spell-detail-line"><b>ASI:</b> ${escapeHTML(item.asi_desc)}</div>`;
     if (item.skill_proficiencies) html += `<div class="spell-detail-line"><b>Skills:</b> ${escapeHTML(item.skill_proficiencies)}</div>`;
     if (item.tool_proficiencies)  html += `<div class="spell-detail-line"><b>Tools:</b> ${escapeHTML(item.tool_proficiencies)}</div>`;
     if (item.languages)           html += `<div class="spell-detail-line"><b>Languages:</b> ${escapeHTML(item.languages)}</div>`;
+    if (item.feat_name)           html += `<div class="spell-detail-line"><b>Feat:</b> ${escapeHTML(item.feat_name)}</div>`;
     if (item.feature)             html += `<div class="spell-detail-line"><b>Feature:</b> ${escapeHTML(item.feature)}</div>`;
     if (item.feature_desc)        html += `<div class="spell-detail-desc">${escapeHTML(item.feature_desc)}</div>`;
     if (item.equipment)           html += `<div class="spell-detail-line"><b>Equipment:</b> ${escapeHTML(item.equipment)}</div>`;
@@ -3451,6 +3459,7 @@ function restore() {
       const isLegacyAC      = !('acOverride' in obj);
       const isLegacyHPMax   = !('hpMaxOverride' in obj);
       character = Object.assign(blankCharacter(), obj);
+      migrateBackgroundSlug(character);
       if (isLegacyAC)    inferLegacyACOverride();
       if (isLegacyHPMax) inferLegacyHPMaxOverride();
     }
@@ -3500,6 +3509,7 @@ function importJSON(file) {
       const isLegacyAC    = !('acOverride' in obj);
       const isLegacyHPMax = !('hpMaxOverride' in obj);
       character = Object.assign(blankCharacter(), obj);
+      migrateBackgroundSlug(character);
       if (isLegacyAC)    inferLegacyACOverride();
       if (isLegacyHPMax) inferLegacyHPMaxOverride();
       renderAll();
@@ -5028,6 +5038,101 @@ function setApiFailedBanner(failedPresets) {
   banner.classList.remove('hidden');
 }
 
+/**
+ * Maps old v1 background slugs (stored in saved characters) to their v2 key equivalents.
+ * Needed because we now fetch backgrounds from the v2 API which uses prefixed keys.
+ */
+const BG_SLUG_MIGRATION = {
+  'acolyte':                'srd_acolyte',
+  'artisan':                'a5e-ag_artisan',
+  'charlatan':              'a5e-ag_charlatan',
+  'con-artist':             'open5e_con-artist',
+  'court-servant':          'toh_court-servant',
+  'crime-syndicate-member': 'tdcs_crime-syndicate-member',
+  'criminal':               'a5e-ag_criminal',
+  'desert-runner':          'toh_desert-runner',
+  'destined':               'toh_destined',
+  'diplomat':               'toh_diplomat',
+  'elemental-warden':       'tdcs_elemental-warden',
+  'entertainer':            'a5e-ag_entertainer',
+  'exile':                  'a5e-ag_exile',
+  'farmer':                 'a5e-ag_farmer',
+  'fate-touched':           'tdcs_fate-touched',
+  'folk-hero':              'a5e-ag_folk-hero',
+  'forest-dweller':         'toh_forest-dweller',
+  'former-adventurer':      'toh_former-adventurer',
+  'freebooter':             'toh_freebooter',
+  'gambler':                'a5e-ag_gambler',
+  'gamekeeper':             'toh_gamekeeper',
+  'guildmember':            'a5e-ag_guildmember',
+  'hermit':                 'a5e-ag_hermit',
+  'innkeeper':              'toh_innkeeper',
+  'lyceum-student':         'tdcs_lyceum-student',
+  'marauder':               'a5e-ag_marauder',
+  'mercenary-company-scion':'toh_mercenary-company-scion',
+  'mercenary-recruit':      'toh_mercenary-recruit',
+  'monstrous-adoptee':      'toh_monstrous-adoptee',
+  'mysterious-origins':     'toh_mysterious-origins',
+  'northern-minstrel':      'toh_northern-minstrel',
+  'occultist':              'toh_occultist',
+  'outlander':              'a5e-ag_outlander',
+  'parfumier':              'toh_parfumier',
+  'recovered-cultist':      'tdcs_recovered-cultist',
+  'sage':                   'a5e-ag_sage',
+  'sailor':                 'a5e-ag_sailor',
+  'scoundrel':              'open5e_scoundrel',
+  'sentry':                 'toh_sentry',
+  'trader':                 'a5e-ag_trader',
+  'trophy-hunter':          'toh_trophy-hunter',
+  'urchin':                 'a5e-ag_urchin',
+};
+
+/** Map v2 document keys back to the v1-style slugs the rest of the app uses for grouping. */
+function v2DocKeyToDocSlug(v2Key) {
+  const map = {
+    'srd-2014': 'wotc-srd',
+    'srd-2024': 'srd-2024',  // new source — kept as-is
+    'open5e':   'o5e',
+    'tdcs':     'taldorei',
+    'a5e-ag':   'a5e',
+    'a5e-ddg':  'a5e',
+    'a5e-gpg':  'a5e',
+    'toh':      'toh',
+  };
+  return map[v2Key] || v2Key;
+}
+
+/**
+ * Converts a v2 background object (benefits array) into the flat shape
+ * that the rest of the app expects (same fields as the old v1 response).
+ */
+function normalizeV2Background(v2) {
+  const benefits = v2.benefits || [];
+  const getDesc = type => (benefits.find(b => b.type === type) || {}).desc || null;
+  const getName = type => (benefits.find(b => b.type === type) || {}).name || null;
+  return {
+    slug:                v2.key,
+    name:                v2.name,
+    desc:                v2.desc || '',
+    skill_proficiencies: getDesc('skill_proficiency'),
+    tool_proficiencies:  getDesc('tool_proficiency'),
+    languages:           getDesc('language'),
+    equipment:           getDesc('equipment'),
+    feature:             getName('feature'),
+    feature_desc:        getDesc('feature'),
+    asi_desc:            getDesc('ability_score'),
+    feat_name:           getName('feat'),
+    document__slug:      v2DocKeyToDocSlug((v2.document || {}).key || ''),
+  };
+}
+
+/** Apply v1→v2 slug migration to a character object in-place (idempotent). */
+function migrateBackgroundSlug(ch) {
+  if (ch.backgroundSlug && BG_SLUG_MIGRATION[ch.backgroundSlug]) {
+    ch.backgroundSlug = BG_SLUG_MIGRATION[ch.backgroundSlug];
+  }
+}
+
 async function loadPresets() {
   setApiLoading(true);
   // Hide any previous failure banner while we retry
@@ -5039,7 +5144,7 @@ async function loadPresets() {
   // than waiting for the (much larger) spells payload.
   const clsP    = fetch(`${SRD_BASE}/classes/?limit=50`,        { headers }).then(r => r.json()).catch(() => null);
   const racP    = fetch(`${SRD_BASE}/races/?limit=100`,         { headers }).then(r => r.json()).catch(() => null);
-  const bgP     = fetch(`${SRD_BASE}/backgrounds/?limit=100`,   { headers }).then(r => r.json()).catch(() => null);
+  const bgP     = fetch(`${SRD_BASE_V2}/backgrounds/?limit=100`, { headers }).then(r => r.json()).catch(() => null);
   const featsP  = fetch(`${SRD_BASE}/feats/?limit=200`,         { headers }).then(r => r.json()).catch(() => null);
   const spellsP = fetch(`${SRD_BASE_V2}/spells/?limit=2000&fields=key,name,document,level,school,casting_time,ritual`, { headers }).then(r => r.json()).catch(() => null);
   const armorP  = fetch(`${SRD_BASE}/armor/?limit=100`,         { headers }).then(r => r.json()).catch(() => null);
@@ -5058,7 +5163,7 @@ async function loadPresets() {
   // Phase 2: everything else.
   const [rac, bg, feats, spells, armor, mi] = await Promise.all([racP, bgP, featsP, spellsP, armorP, miP]);
   if (rac    && rac.results)    presetCache.race       = rac.results;
-  if (bg     && bg.results)     presetCache.background = bg.results;
+  if (bg     && bg.results)     presetCache.background = bg.results.map(normalizeV2Background);
   if (feats  && feats.results)  presetCache.feats      = feats.results;
   if (spells && spells.results) presetCache.spells     = spells.results;
   if (armor  && armor.results)  presetCache.armor      = armor.results;
@@ -5173,14 +5278,15 @@ async function loadPresets() {
 
 // Friendly source tags for non-SRD content.
 const SOURCE_TAGS = {
-  'wotc-srd':   '',
-  'toh':        'ToH',         // Tome of Heroes (Kobold Press)
-  'a5e':        'A5E',         // Level Up: Advanced 5e
-  'taldorei':   'Tal’Dorei',
-  'o5e':        'Open5e',
-  'kp':         'Kobold',
-  'blackflag':  'BlackFlag',
-  'supplement': 'Custom',
+  ‘wotc-srd’:   ‘’,
+  ‘srd-2024’:   ‘SRD 2024’,
+  ‘toh’:        ‘ToH’,         // Tome of Heroes (Kobold Press)
+  ‘a5e’:        ‘A5E’,         // Level Up: Advanced 5e
+  ‘taldorei’:   ‘Tal’Dorei’,
+  ‘o5e’:        ‘Open5e’,
+  ‘kp’:         ‘Kobold’,
+  ‘blackflag’:  ‘BlackFlag’,
+  ‘supplement’: ‘Custom’,
 };
 function sourceTag(slug) {
   if (slug in SOURCE_TAGS) return SOURCE_TAGS[slug];
@@ -5241,7 +5347,7 @@ function populatePresetSelects() {
   $$('.srd-preset').forEach(sel => sel.addEventListener('change', onPresetChange));
 }
 
-const SOURCE_ORDER = ['wotc-srd', 'blackflag', 'o5e', 'a5e', 'toh', 'kp', 'taldorei'];
+const SOURCE_ORDER = ['wotc-srd', 'srd-2024', 'blackflag', 'o5e', 'a5e', 'toh', 'kp', 'taldorei'];
 
 const PRESET_PLACEHOLDER = { class: 'Pick a Class…', race: 'Pick a Race…', background: 'Pick a Background…' };
 
