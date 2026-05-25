@@ -1629,10 +1629,11 @@ function docSlugToUrlPrefix(docSlug) {
 /** open5e.com URL for a preset item (uses v2-style "{prefix}_{slug}" format). */
 function presetOpen5eUrl(preset, item) {
   const paths  = { class: 'classes', race: 'races', background: 'backgrounds' };
-  if (preset === 'background') {
-    // v2 background keys already contain the full prefix (e.g. "a5e-ag_hermit"),
-    // so use the slug directly — no extra prefix concat needed.
-    return `https://open5e.com/backgrounds/${encodeURIComponent(item.slug || '')}`;
+  if (preset === 'background' || item._v2slug) {
+    // v2 keys (backgrounds and v2 classes) already contain the full prefix,
+    // e.g. "a5e-ag_hermit" or "a5e_marshal" — use slug directly.
+    const section = paths[preset] || preset;
+    return `https://open5e.com/${section}/${encodeURIComponent(item.slug || '')}`;
   }
   const prefix = docSlugToUrlPrefix(item.document__slug);
   const baseSl = item._baseSlug || (item.slug || '').split(':')[0];
@@ -5106,6 +5107,7 @@ function v2DocKeyToDocSlug(v2Key) {
     'a5e-ddg':  'a5e',
     'a5e-gpg':  'a5e',
     'toh':      'toh',
+    'bfrd':     'blackflag',
   };
   return map[v2Key] || v2Key;
 }
@@ -5142,7 +5144,197 @@ function normalizeV2Background(v2) {
   };
 }
 
-/** Apply v1→v2 slug migration to a character object in-place (idempotent). */
+// ===========================================================================
+// V2 class normalization helpers
+// ===========================================================================
+
+/** Normalize a v2 hit-dice string ('D10') to the v1 lowercase format ('1d10'). */
+function normalizeV2HitDice(raw) {
+  if (!raw) return '';
+  const s = String(raw).toLowerCase();      // 'D10' -> 'd10'
+  if (/^\d+d\d+$/.test(s)) return s;        // already '1d10' etc — pass through
+  if (/^d\d+$/.test(s))    return '1' + s;  // 'd10' -> '1d10'
+  return s;
+}
+
+/**
+ * Given a v2 features array, extract proficiency strings from a PROFICIENCIES
+ * feature (bold-markdown format) or a CORE_TRAITS_TABLE feature (pipe-table format).
+ * Returns { armor, weapons, tools, skills }.
+ */
+function parseV2Proficiencies(features) {
+  const out = { armor: '', weapons: '', tools: '', skills: '' };
+
+  // Try PROFICIENCIES first (A5E / BlackFlag format: **Armor:** value)
+  const profFeat = (features || []).find(f => f.feature_type === 'PROFICIENCIES');
+  if (profFeat && profFeat.desc) {
+    const desc = profFeat.desc;
+    const grab = label => {
+      const re = new RegExp('\\*\\*' + label + ':\\*\\*\\s*([^\\n*]+)', 'i');
+      const m = desc.match(re);
+      return m ? m[1].trim() : '';
+    };
+    out.armor   = grab('Armor');
+    out.weapons = grab('Weapons');
+    out.tools   = grab('Tools');
+    out.skills  = grab('Skills');
+    return out;
+  }
+
+  // Try CORE_TRAITS_TABLE (SRD-2024 format: pipe table)
+  const cttFeat = (features || []).find(f => f.feature_type === 'CORE_TRAITS_TABLE');
+  if (cttFeat && cttFeat.desc) {
+    const lines = cttFeat.desc.split('\n');
+    const grabRow = label => {
+      for (const line of lines) {
+        const cells = line.split('|').map(s => s.trim()).filter(Boolean);
+        if (cells.length >= 2 && cells[0].toLowerCase().includes(label.toLowerCase())) {
+          return cells[1];
+        }
+      }
+      return '';
+    };
+    out.armor   = grabRow('Armor Training');
+    out.weapons = grabRow('Weapon Proficiencies');
+    out.tools   = grabRow('Tool Proficiencies');
+    out.skills  = grabRow('Skill Proficiencies');
+    return out;
+  }
+
+  return out;
+}
+
+/** Standard proficiency bonus per level (index 0 = level 1). */
+const V2_PROF_BONUS = [2,2,2,2,3,3,3,3,4,4,4,4,4,5,5,5,5,5,6,6];
+
+/**
+ * Build the synthetic markdown class table from v2 CLASS_LEVEL_FEATURE gained_at arrays.
+ * Output matches the format parseFeatureTable() expects (Level + Features columns).
+ */
+function buildV2ClassTable(features) {
+  const byLevel = {};
+  for (let i = 1; i <= 20; i++) byLevel[i] = [];
+
+  (features || []).forEach(f => {
+    if (f.feature_type !== 'CLASS_LEVEL_FEATURE') return;
+    const levels = (f.gained_at || []).map(g => g.level).filter(l => l >= 1 && l <= 20);
+    if (!levels.length) return;  // skip empty gained_at (meta-pointers like 'Bard Subclass')
+    levels.forEach(lvl => { byLevel[lvl].push(f.name); });
+  });
+
+  const ordinals = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th',
+                    '11th','12th','13th','14th','15th','16th','17th','18th','19th','20th'];
+  const rows = ['| Level | Proficiency Bonus | Features |', '| --- | --- | --- |'];
+  for (let i = 1; i <= 20; i++) {
+    const feats = byLevel[i].join(', ') || '—';
+    rows.push(`| ${ordinals[i-1]} | +${V2_PROF_BONUS[i-1]} | ${feats} |`);
+  }
+  return rows.join('\n');
+}
+
+/**
+ * Build the synthetic class desc markdown from v2 CLASS_LEVEL_FEATURE and
+ * CLASS_FEATURE_OPTION_LIST features.
+ *
+ * Each feature becomes a "### Name\n{body}" section. Existing ### headers inside
+ * feature descs are demoted to #### so they don't collide with parseFeatureDescs().
+ * CLASS_FEATURE_OPTION_LIST descs are merged into the same-named LEVEL_FEATURE.
+ */
+function buildV2ClassDesc(features) {
+  // Collect LEVEL_FEATUREs: name -> { firstLevel, desc }
+  const byName = new Map();
+  (features || []).forEach(f => {
+    if (f.feature_type !== 'CLASS_LEVEL_FEATURE') return;
+    const levels = (f.gained_at || []).map(g => g.level).filter(l => l >= 1 && l <= 20);
+    if (!levels.length) return;  // skip meta-pointers with no level (e.g. 'Bard Subclass')
+    if (byName.has(f.name)) return;  // deduplicate repeated entries (e.g. multi-level ASI)
+    byName.set(f.name, { firstLevel: Math.min(...levels), desc: f.desc || '' });
+  });
+
+  // Merge OPTION_LIST descs into the same-named LEVEL_FEATURE (e.g. Marshal 'Lessons of War')
+  (features || []).forEach(f => {
+    if (f.feature_type !== 'CLASS_FEATURE_OPTION_LIST') return;
+    const host = byName.get(f.name);
+    if (host && f.desc) {
+      // Demote internal ### to #### before appending so parseFeatureDescs won't split on them
+      const demoted = f.desc.replace(/^###\s+/gm, '#### ');
+      host.desc = (host.desc ? host.desc + '\n\n' : '') + demoted;
+    }
+  });
+
+  // Sort by firstLevel, then alphabetically
+  const sorted = Array.from(byName.entries())
+    .sort((a, b) => a[1].firstLevel - b[1].firstLevel || a[0].localeCompare(b[0]));
+
+  return sorted.map(([name, { desc }]) => {
+    // Demote any remaining ### in the body to #### to protect the splitter
+    const safe = (desc || '').replace(/^###\s+/gm, '#### ');
+    return `### ${name}\n${safe}`;
+  }).join('\n\n');
+}
+
+/**
+ * Build an archetype desc in the ##### format that parseSubclassFeatures() expects.
+ * Internal ## and ### headers are demoted to #### (renders as '— Name —').
+ */
+function buildV2ArchetypeDesc(features) {
+  const levelFeats = (features || []).filter(
+    f => f.feature_type === 'CLASS_LEVEL_FEATURE' &&
+         (f.gained_at || []).some(g => g.level >= 1 && g.level <= 20)
+  );
+
+  levelFeats.sort((a, b) => {
+    const la = Math.min(...a.gained_at.map(g => g.level));
+    const lb = Math.min(...b.gained_at.map(g => g.level));
+    return la - lb || a.name.localeCompare(b.name);
+  });
+
+  return levelFeats.map(f => {
+    // Demote ## and ### to #### so they render as subheaders, not splitter tokens
+    const body = (f.desc || '').replace(/^#{2,3}\s+/gm, '#### ');
+    return `##### ${f.name}\n${body}`;
+  }).join('\n\n');
+}
+
+/**
+ * Normalize a single v2 class entry to the flat v1-compatible shape used by applyClass()
+ * and renderClassFeatures(). Pass the full allV2 array so subclasses can be found.
+ */
+function normalizeV2Class(v2, allV2) {
+  const features  = v2.features || [];
+  const docKey    = (v2.document || {}).key || '';
+  const profs     = parseV2Proficiencies(features);
+  const savThrows = (v2.saving_throws || []).map(s => s.name).join(', ');
+
+  // Build archetypes from matching subclasses in allV2
+  const archetypes = (allV2 || [])
+    .filter(r => r.subclass_of && r.subclass_of.key === v2.key)
+    .map(sub => ({
+      slug:           sub.key,
+      name:           sub.name,
+      desc:           buildV2ArchetypeDesc(sub.features || []),
+      document__slug: v2DocKeyToDocSlug((sub.document || {}).key || ''),
+    }));
+
+  return {
+    slug:               v2.key,
+    name:               v2.name,
+    hit_dice:           normalizeV2HitDice(v2.hit_dice),
+    prof_saving_throws: savThrows,
+    prof_armor:         profs.armor,
+    prof_weapons:       profs.weapons,
+    prof_tools:         profs.tools && profs.tools.toLowerCase() !== 'none' ? profs.tools : '',
+    prof_skills:        profs.skills,
+    desc:               buildV2ClassDesc(features),
+    table:              buildV2ClassTable(features),
+    archetypes,
+    subtypes_name:      'Archetype',
+    document__slug:     v2DocKeyToDocSlug(docKey),
+    _v2slug:            true,
+  };
+}
+
+/** Apply v1->v2 slug migration to a character object in-place (idempotent). */
 function migrateBackgroundSlug(ch) {
   if (ch.backgroundSlug && BG_SLUG_MIGRATION[ch.backgroundSlug]) {
     ch.backgroundSlug = BG_SLUG_MIGRATION[ch.backgroundSlug];
@@ -5155,10 +5347,12 @@ async function loadPresets() {
   setApiFailedBanner([]);
   const headers = { 'Accept': 'application/json' };
 
-  // Kick off all fetches in parallel — but await classes FIRST so the
+  // Kick off all fetches in parallel — but await v1 classes FIRST so the
   // "Class Features" section can render as soon as that one arrives, rather
   // than waiting for the (much larger) spells payload.
+  // v2 classes run alongside everything else (Phase 2).
   const clsP    = fetch(`${SRD_BASE}/classes/?limit=50`,        { headers }).then(r => r.json()).catch(() => null);
+  const cls2P   = fetch(`${SRD_BASE_V2}/classes/?limit=200`,    { headers }).then(r => r.json()).catch(() => null);
   const racP    = fetch(`${SRD_BASE}/races/?limit=100`,         { headers }).then(r => r.json()).catch(() => null);
   const bgP     = fetch(`${SRD_BASE_V2}/backgrounds/?limit=100`, { headers }).then(r => r.json()).catch(() => null);
   const featsP  = fetch(`${SRD_BASE}/feats/?limit=200`,         { headers }).then(r => r.json()).catch(() => null);
@@ -5166,7 +5360,7 @@ async function loadPresets() {
   const armorP  = fetch(`${SRD_BASE}/armor/?limit=100`,         { headers }).then(r => r.json()).catch(() => null);
   const miP     = fetch(`${SRD_BASE}/magicitems/?limit=2000`,   { headers }).then(r => r.json()).catch(() => null);
 
-  // Phase 1: classes — render Class Features immediately when ready.
+  // Phase 1: v1 classes — render Class Features immediately when ready.
   const cls = await clsP;
   if (cls && cls.results) {
     presetCache.class = cls.results;
@@ -5176,8 +5370,24 @@ async function loadPresets() {
     }
   }
 
-  // Phase 2: everything else.
-  const [rac, bg, feats, spells, armor, mi] = await Promise.all([racP, bgP, featsP, spellsP, armorP, miP]);
+  // Phase 2: everything else, including v2 classes.
+  const [cls2, rac, bg, feats, spells, armor, mi] = await Promise.all([cls2P, racP, bgP, featsP, spellsP, armorP, miP]);
+
+  // Append normalized v2 base classes (non-srd-2014) to the class preset list.
+  // srd-2014 base classes are already covered by the v1 fetch above.
+  if (cls2 && cls2.results) {
+    const allV2 = cls2.results;
+    const v2Extras = allV2
+      .filter(r => !r.subclass_of && (r.document || {}).key !== 'srd-2014')
+      .map(r => normalizeV2Class(r, allV2));
+    presetCache.class = [...(presetCache.class || []), ...v2Extras];
+    // If the current character uses a v2 class slug, re-render now that data arrived
+    if (character.classSlug && v2Extras.some(c => c.slug === character.classSlug)) {
+      renderClassFeatures();
+      renderSpellcasting();
+    }
+  }
+
   if (rac    && rac.results)    presetCache.race       = rac.results;
   if (bg     && bg.results)     presetCache.background = bg.results.map(normalizeV2Background);
   if (feats  && feats.results)  presetCache.feats      = feats.results;
@@ -6128,7 +6338,12 @@ function applyBackground(slug) {
   if (b.languages)          appendAutoText('proficiencies', 'background', `Languages: ${b.languages}`);
   if (b.equipment)          appendAutoText('equipment',     'background', `${b.name} starting equipment: ${b.equipment}\n---`);
   if (b.feature)            appendAutoText('features',      'background', `--- ${b.feature} (${b.name}) ---\n${b.feature_desc || ''}\n---`);
-  if (b.asi_desc)           appendAutoText('features',      'background', `ASI (${b.name}): ${b.asi_desc}`);
+  if (b.asi_desc) {
+    const a5eRule = b.document__slug === 'a5e'
+      ? ' Increase one by 2 and another by 1, or increase all three by 1. None of these increases can raise a score above 20.'
+      : '';
+    appendAutoText('features', 'background', `ASI (${b.name}): ${b.asi_desc}${a5eRule}`);
+  }
   if (b.feat_name)          appendAutoText('features',      'background', `Feat (${b.name}): ${b.feat_name}`);
 
   renderAll();
@@ -6390,8 +6605,13 @@ function openRestModal(defaultType = 'short') {
 // ====================================================================
 // Default spellcasting ability for each base SRD class
 const CLASS_SPELL_ABILITY = {
+  // SRD 2014 (v1 slugs)
   bard: 'cha', cleric: 'wis', druid: 'wis', paladin: 'cha',
   ranger: 'wis', sorcerer: 'cha', warlock: 'cha', wizard: 'int',
+  // SRD 2024 (v2 slugs)
+  'srd-2024_bard': 'cha', 'srd-2024_cleric': 'wis', 'srd-2024_druid': 'wis',
+  'srd-2024_paladin': 'cha', 'srd-2024_ranger': 'wis', 'srd-2024_sorcerer': 'cha',
+  'srd-2024_warlock': 'cha', 'srd-2024_wizard': 'int',
 };
 
 // Class-granted Expertise (double proficiency bonus) — unlocks at given level
