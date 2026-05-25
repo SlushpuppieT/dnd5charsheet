@@ -1686,7 +1686,15 @@ function renderPresetPopupContent(preset, item) {
     if (item.skill_proficiencies) html += `<div class="spell-detail-line"><b>Skills:</b> ${escapeHTML(item.skill_proficiencies)}</div>`;
     if (item.tool_proficiencies)  html += `<div class="spell-detail-line"><b>Tools:</b> ${escapeHTML(item.tool_proficiencies)}</div>`;
     if (item.languages)           html += `<div class="spell-detail-line"><b>Languages:</b> ${escapeHTML(item.languages)}</div>`;
-    if (item.feat_name)           html += `<div class="spell-detail-line"><b>Feat:</b> ${escapeHTML(item.feat_name)}</div>`;
+    if (item.feat_name) {
+      const featUrl = item.feat_slug
+        ? `https://open5e.com/feats/${encodeURIComponent(item.feat_slug)}`
+        : null;
+      const featLabel = featUrl
+        ? `<a href="${escapeAttr(featUrl)}" target="_blank" rel="noopener">${escapeHTML(item.feat_name)} &#x2197;</a>`
+        : escapeHTML(item.feat_name);
+      html += `<div class="spell-detail-line"><b>Feat:</b> ${featLabel}</div>`;
+    }
     if (item.feature)             html += `<div class="spell-detail-line"><b>Feature:</b> ${escapeHTML(item.feature)}</div>`;
     if (item.feature_desc)        html += `<div class="spell-detail-desc">${escapeHTML(item.feature_desc)}</div>`;
     if (item.equipment)           html += `<div class="spell-detail-line"><b>Equipment:</b> ${escapeHTML(item.equipment)}</div>`;
@@ -5110,6 +5118,13 @@ function normalizeV2Background(v2) {
   const benefits = v2.benefits || [];
   const getDesc = type => (benefits.find(b => b.type === type) || {}).desc || null;
   const getName = type => (benefits.find(b => b.type === type) || {}).name || null;
+  const rawDocKey = (v2.document || {}).key || '';
+  const featName  = getDesc('feat');  // e.g. "Magic Initiate (Cleric)"
+  // Build feat slug: strip parenthetical variant, kebab-case, prepend source prefix
+  // e.g. "Magic Initiate (Cleric)" + "srd-2024" → "srd-2024_magic-initiate"
+  const feat_slug = featName
+    ? rawDocKey + '_' + featName.replace(/\s*\([^)]*\)/g, '').trim().toLowerCase().replace(/\s+/g, '-')
+    : null;
   return {
     slug:                v2.key,
     name:                v2.name,
@@ -5121,8 +5136,9 @@ function normalizeV2Background(v2) {
     feature:             getName('feature'),
     feature_desc:        getDesc('feature'),
     asi_desc:            getDesc('ability_score'),
-    feat_name:           getName('feat'),
-    document__slug:      v2DocKeyToDocSlug((v2.document || {}).key || ''),
+    feat_name:           featName,
+    feat_slug:           feat_slug,
+    document__slug:      v2DocKeyToDocSlug(rawDocKey),
   };
 }
 
@@ -6112,6 +6128,8 @@ function applyBackground(slug) {
   if (b.languages)          appendAutoText('proficiencies', 'background', `Languages: ${b.languages}`);
   if (b.equipment)          appendAutoText('equipment',     'background', `${b.name} starting equipment: ${b.equipment}\n---`);
   if (b.feature)            appendAutoText('features',      'background', `--- ${b.feature} (${b.name}) ---\n${b.feature_desc || ''}\n---`);
+  if (b.asi_desc)           appendAutoText('features',      'background', `ASI (${b.name}): ${b.asi_desc}`);
+  if (b.feat_name)          appendAutoText('features',      'background', `Feat (${b.name}): ${b.feat_name}`);
 
   renderAll();
   persist();
