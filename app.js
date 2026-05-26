@@ -2846,6 +2846,10 @@ function autoResizeTextarea(el) {
 
 function applyBindingsToInputs() {
   $$('[data-bind]').forEach(el => {
+    // Skip disabled/locked inputs — their displayed values are managed by
+    // dedicated render functions (e.g. renderSpellcasting sets cantripsKnown
+    // to class value + feat bonus; applyArmorAC sets ac; etc.)
+    if (el.disabled) return;
     const key = el.dataset.bind;
     if (!(key in character)) return;
     const val = character[key];
@@ -7591,17 +7595,23 @@ function sumFeatSpeedBonuses() {
 }
 
 /**
- * Re-derive character.speed from baseSpeed + feat bonuses.
- * Lazy-initialises baseSpeed from the current speed value (net of existing
- * feat bonuses) so characters without a race still get speed bonuses applied.
+ * Ensure character.baseSpeed reflects the non-feat walking speed.
+ * Must be called BEFORE adding/removing feats so sumFeatSpeedBonuses()
+ * still reflects the OLD state when we back-compute the base.
  */
-function recomputeSpeed() {
+function ensureBaseSpeed() {
   if (!character.baseSpeed && character.speed) {
-    // Back-compute the non-feat base from whatever is currently showing.
-    // Handles: default speed 30 with no race, or old saves with baked-in values.
     character.baseSpeed = Math.max(0, Number(character.speed) - sumFeatSpeedBonuses());
   }
-  if (!character.baseSpeed) return; // speed = 0 and no feats: nothing to do
+}
+
+/**
+ * Re-derive character.speed from baseSpeed + feat bonuses.
+ * Caller must invoke ensureBaseSpeed() before mutating character.feats
+ * so that baseSpeed is correct when this function runs.
+ */
+function recomputeSpeed() {
+  if (!character.baseSpeed) return;
   character.speed = Number(character.baseSpeed) + sumFeatSpeedBonuses();
 }
 
@@ -7645,9 +7655,11 @@ function addFeatToCharacter(feat) {
     spellsBonus:     0,
     poolBoosts:      [],  // [{ poolKey: string, poolName: string, amount: number }] key='' for custom pools
   };
+  // Initialise baseSpeed before the push so sumFeatSpeedBonuses() still reflects the old state
+  if (speedBonus) ensureBaseSpeed();
   character.feats.push(newFeat);
 
-  // Live-compute speed only when this feat changes the total (preserves manual overrides)
+  // Live-compute speed now that baseSpeed is initialised and new feat is in the array
   if (speedBonus) recomputeSpeed();
 
   renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
@@ -7797,8 +7809,10 @@ function renderFeats() {
       const removed = character.feats[idx];
       const label = (removed && removed.name && removed.name.trim()) ? `<strong>${escapeHTML(removed.name.trim())}</strong>` : 'this unnamed feat';
       confirmDel(`Are you sure you want to remove the feat ${label}?`, () => {
+        // Initialise baseSpeed BEFORE splice so sumFeatSpeedBonuses() still includes the removed feat
+        if (removed && removed.speedBonus) ensureBaseSpeed();
         character.feats.splice(idx, 1);
-        // Live-compute speed only when the removed feat had a speed bonus
+        // Now recompute with the feat gone
         if (removed && removed.speedBonus) recomputeSpeed();
         renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
         renderFeats(); persist();
@@ -7978,6 +7992,10 @@ function openCustomFeatModal(existingFeat, existingIndex) {
         poolBoosts,
       };
 
+      // Initialise baseSpeed BEFORE mutating feats so sumFeatSpeedBonuses()
+      // still reflects the old state when ensureBaseSpeed() back-computes the base.
+      if (speedBonus || hadSpeedBefore) ensureBaseSpeed();
+
       character.feats = character.feats || [];
       if (isEdit) {
         character.feats[existingIndex] = featData;
@@ -7985,7 +8003,7 @@ function openCustomFeatModal(existingFeat, existingIndex) {
         character.feats.push(featData);
       }
 
-      // Recompute speed if this feat or the previous version had a speed bonus
+      // Recompute speed now that baseSpeed is set and feats array is updated
       if (speedBonus || hadSpeedBefore) recomputeSpeed();
 
       renderAll();
