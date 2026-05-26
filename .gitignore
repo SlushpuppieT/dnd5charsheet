@@ -19,3 +19,8 @@ Thumbs.db
 git.key
 git.key.pub
 todo.md
+
+# Dev tooling / Claude instructions — not part of the website
+check-js.py
+prune-deployments.py
+CLAUDE.md

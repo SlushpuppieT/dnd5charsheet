@@ -68,7 +68,8 @@ function blankCharacter() {
     magicArmor1: null,       // { slug, source, name, acBonus, raw } | null  — flat-bonus AC item
     magicArmor2: null,       // same shape as magicArmor1
     speed: 30,
-    baseSpeed: 0,            // race-granted walking speed; 0 = no race applied. Used to flag non-standard speed values.
+    baseSpeed: 0,            // race-granted walking speed; 0 = no race applied
+    speedOverride: 0,        // user delta on top of (baseSpeed + feat bonuses); mirrors acOverride
     initiativeBonus: 0,      // user's manual delta from the computed (dexMod + auto-feat) initiative
     hpMax: 10,
     hpMaxOverride: 0,        // user delta on top of auto-calc max HP (parallels acOverride)
@@ -971,6 +972,13 @@ function renderCombat() {
   }
   $('#prof-bonus').textContent = fmtMod(proficiencyBonus(character.level));
 
+  // Speed input — update value and deviation flag (skip if user is actively editing)
+  const speedInp = $('input[data-bind="speed"]');
+  if (speedInp && document.activeElement !== speedInp) {
+    speedInp.value = Number(character.speed) || 0;
+    applySpeedDeviation();
+  }
+
   // HP bar
   const pct = character.hpMax > 0 ? Math.max(0, Math.min(100, (character.hpCurrent / character.hpMax) * 100)) : 0;
   $('#hp-bar-fill').style.width = pct + '%';
@@ -1279,6 +1287,25 @@ function migrateSpellSlotBonuses() {
     }
     if (typeof s.used !== 'number') s.used = 0;
   });
+}
+
+/**
+ * One-time migration: introduce speedOverride.
+ * Heals corrupted baseSpeed values that past lazy-init code may have written.
+ */
+function migrateSpeedOverride() {
+  if (character.speedOverride !== undefined) return;  // already migrated
+  const speed    = Number(character.speed)     || 0;
+  const base     = Number(character.baseSpeed) || 0;
+  const featSum  = sumFeatSpeedBonuses();
+  // If baseSpeed looks corrupted (non-zero but no race applied), zero it out
+  // but preserve the user's displayed speed by capturing the residual in speedOverride.
+  if (base > 0 && !character.raceSlug) {
+    character.baseSpeed     = 0;
+    character.speedOverride = speed - featSum;
+  } else {
+    character.speedOverride = speed - base - featSum;
+  }
 }
 
 function getSlotData(lvl) {
@@ -2921,8 +2948,10 @@ function attachBindings() {
         character.hpCurrent = Math.max(0, Math.min(character.hpMax, Number(val) || 0));
         renderCombat();
       } else if (key === 'speed') {
-        // Back-compute baseSpeed so feat bonuses stay additive on top of user's intended base
-        character.baseSpeed = Math.max(0, (Number(val) || 0) - sumFeatSpeedBonuses());
+        // Store how far the user has deviated from (baseSpeed + feat bonuses)
+        const typed = Number(val) || 0;
+        character.speed = typed;
+        character.speedOverride = typed - (Number(character.baseSpeed) || 0) - sumFeatSpeedBonuses();
         applySpeedDeviation();
       } else if (key === 'ac') {
         // User typed/stepped a new final AC value. Back-compute the override
@@ -3125,15 +3154,15 @@ function classExpectedHitDie() {
   return m ? m[0] : null;
 }
 
-// Flag the Speed input when the current speed doesn't match race default + feat bonuses.
+// Flag the Speed input when the user has overridden the race default + feat bonuses.
 function applySpeedDeviation() {
   const inp = $('input[data-bind="speed"]');
   if (!inp) return;
-  const base     = Number(character.baseSpeed) || 0;
-  const cur      = Number(character.speed)     || 0;
-  const expected = base + sumFeatSpeedBonuses();
-  if (base && cur !== expected) {
+  const base     = Number(character.baseSpeed)     || 0;
+  const override = Number(character.speedOverride) || 0;
+  if (base && override !== 0) {
     const featPart = sumFeatSpeedBonuses();
+    const expected = base + featPart;
     const featNote = featPart ? ` + ${featPart} ft from feats` : '';
     inp.classList.add('hb-deviation');
     inp.title = `Non-standard speed (expected: ${base} ft base${featNote} = ${expected} ft)`;
@@ -5841,6 +5870,7 @@ async function loadPresets() {
   mergeRaceSupplementIntoCache(); // inject user-curated races/subraces
   applySubclassPools();         // rebuild subclass pools now that the supplement is available
   migrateSpellSlotBonuses();    // migrate legacy { total } → { bonus } now that class cache is ready
+  migrateSpeedOverride();       // introduce speedOverride; heal corrupted baseSpeed values
   populatePresetSelects();
   populatePresetDropdowns();  // fill custom dropdown lists now that cache is ready
   populateArmorDropdowns();   // now that armor + magicitems caches are populated
@@ -6452,6 +6482,7 @@ function clearRace() {
   character.raceSkillOptions = 'any';
   character.raceFixedSkills = [];
   character.baseSpeed       = 0;
+  character.speedOverride   = 0;
   character.cachedRace      = null;
   // Re-apply other fixed grants so they can reclaim any slots the race was holding.
   reapplyOtherFixedGrants('race');
@@ -6479,19 +6510,18 @@ function clearBackground() {
 function applyClass(slug) {
   const c = presetCache.class.find(x => x.slug === slug);
   if (!c) { toast('SRD class data not loaded — connect to apply a new class'); return; }
+  if (character.classSlug === slug) return;   // already applied — no-op
 
   // Reset stale subclass, skill sources, and previously-auto-added text when switching classes
-  if (character.classSlug !== c.slug) {
-    clearAutoSource('class');
-    clearSubclassSkillGrants();
-    clearSkillSourcesWhere(s => s === 'class');
-    character.classSkillCount = 0;
-    character.classSkillOptions = 'any';
-    character.subclassSlug = '';
-    character.subclass = '';
-    character.spellAbility = '';   // clear old class's ability; new class will set it if applicable
-    character.saves = {};          // clear all saving throw proficiencies; new class re-applies its own
-  }
+  clearAutoSource('class');
+  clearSubclassSkillGrants();
+  clearSkillSourcesWhere(s => s === 'class');
+  character.classSkillCount = 0;
+  character.classSkillOptions = 'any';
+  character.subclassSlug = '';
+  character.subclass = '';
+  character.spellAbility = '';   // clear old class's ability; new class will set it if applicable
+  character.saves = {};          // clear all saving throw proficiencies; new class re-applies its own
   character.class = c.name;
   character.classSlug = c.slug;
   character.cachedClass = c;   // store the class data so the sheet works offline
@@ -6623,16 +6653,15 @@ function applyRace(value) {
   const [baseSlug, subSlug] = value.split(':');
   const r = presetCache.race.find(x => x.slug === baseSlug);
   if (!r) { toast('SRD race data not loaded — connect to apply a new race'); return; }
+  if (character.raceSlug === value) return;   // already applied — no-op
   const sub = subSlug ? (r.subraces || []).find(s => s.slug === subSlug) : null;
 
   // Clear previous race's auto-added text and skill sources before applying the new one
-  if (character.raceSlug !== value) {
-    clearAutoSource('race');
-    clearSkillSourcesWhere(s => s === 'race' || s === 'race-pick' || s === 'race-free');
-    character.raceSkillCount   = 0;
-    character.raceSkillOptions = 'any';
-    character.raceFixedSkills  = [];
-  }
+  clearAutoSource('race');
+  clearSkillSourcesWhere(s => s === 'race' || s === 'race-pick' || s === 'race-free');
+  character.raceSkillCount   = 0;
+  character.raceSkillOptions = 'any';
+  character.raceFixedSkills  = [];
 
   character.race = sub ? `${r.name} (${sub.name})` : r.name;
   character.raceSlug = value;
@@ -6640,8 +6669,9 @@ function applyRace(value) {
   // Subrace speed (e.g. Wood Elf 35) overrides parent race speed (Elf 30).
   const speedWalk = (sub && sub.speed && sub.speed.walk) || (r.speed && r.speed.walk) || 0;
   if (speedWalk) {
-    character.baseSpeed = speedWalk;
-    character.speed     = speedWalk + sumFeatSpeedBonuses();
+    character.baseSpeed    = speedWalk;
+    character.speedOverride = 0;
+    recomputeSpeed();
   }
 
   // Parse and apply racial ASI bonuses
@@ -6798,15 +6828,14 @@ function openRacialASIModal(chooseBonuses, onAfter) {
 function applyBackground(slug) {
   const b = presetCache.background.find(x => x.slug === slug);
   if (!b) { toast('SRD background data not loaded — connect to apply a new background'); return; }
+  if (character.backgroundSlug === slug) return;   // already applied — no-op
 
-  // Clear old background skill grants and auto-text when switching backgrounds
-  if (character.backgroundSlug !== b.slug) {
-    clearAutoSource('background');
-    clearSkillSourcesWhere(s => s === 'background' || s === 'bg-pick' || s === 'bg-free');
-    character.bgSkillCount = 0;
-    character.bgFixedCount = 0;
-    character.bgSkillOptions = 'any';
-  }
+  // Clear old background skill grants and auto-text before applying the new one
+  clearAutoSource('background');
+  clearSkillSourcesWhere(s => s === 'background' || s === 'bg-pick' || s === 'bg-free');
+  character.bgSkillCount = 0;
+  character.bgFixedCount = 0;
+  character.bgSkillOptions = 'any';
 
   character.background = b.name;
   character.backgroundSlug = b.slug;
@@ -7595,24 +7624,13 @@ function sumFeatSpeedBonuses() {
 }
 
 /**
- * Ensure character.baseSpeed reflects the non-feat walking speed.
- * Must be called BEFORE adding/removing feats so sumFeatSpeedBonuses()
- * still reflects the OLD state when we back-compute the base.
- */
-function ensureBaseSpeed() {
-  if (!character.baseSpeed && character.speed) {
-    character.baseSpeed = Math.max(0, Number(character.speed) - sumFeatSpeedBonuses());
-  }
-}
-
-/**
- * Re-derive character.speed from baseSpeed + feat bonuses.
- * Caller must invoke ensureBaseSpeed() before mutating character.feats
- * so that baseSpeed is correct when this function runs.
+ * Re-derive character.speed from baseSpeed + feat bonuses + user override.
+ * Safe to call at any time — no preconditions required.
  */
 function recomputeSpeed() {
-  if (!character.baseSpeed) return;
-  character.speed = Number(character.baseSpeed) + sumFeatSpeedBonuses();
+  character.speed = (Number(character.baseSpeed) || 0)
+                  + sumFeatSpeedBonuses()
+                  + (Number(character.speedOverride) || 0);
 }
 
 function buildFeatDesc(feat) {
@@ -7655,15 +7673,10 @@ function addFeatToCharacter(feat) {
     spellsBonus:     0,
     poolBoosts:      [],  // [{ poolKey: string, poolName: string, amount: number }] key='' for custom pools
   };
-  // Initialise baseSpeed before the push so sumFeatSpeedBonuses() still reflects the old state
-  if (speedBonus) ensureBaseSpeed();
   character.feats.push(newFeat);
-
-  // Live-compute speed now that baseSpeed is initialised and new feat is in the array
   if (speedBonus) recomputeSpeed();
 
-  renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
-  renderFeats();
+  renderAll();
   persist();
 
   const fixedText  = Object.entries(fixed).filter(([,v])=>v>0).map(([k,v])=>`+${v} ${k.toUpperCase()}`).join(', ');
@@ -7809,13 +7822,10 @@ function renderFeats() {
       const removed = character.feats[idx];
       const label = (removed && removed.name && removed.name.trim()) ? `<strong>${escapeHTML(removed.name.trim())}</strong>` : 'this unnamed feat';
       confirmDel(`Are you sure you want to remove the feat ${label}?`, () => {
-        // Initialise baseSpeed BEFORE splice so sumFeatSpeedBonuses() still includes the removed feat
-        if (removed && removed.speedBonus) ensureBaseSpeed();
         character.feats.splice(idx, 1);
-        // Now recompute with the feat gone
         if (removed && removed.speedBonus) recomputeSpeed();
-        renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
-        renderFeats(); persist();
+        renderAll();
+        persist();
         return true;
       });
     });
@@ -7970,8 +7980,6 @@ function openCustomFeatModal(existingFeat, existingIndex) {
       const cantripsBonus   = Number($('#cfeat-cantrips').value) || 0;
       const spellsBonus     = Number($('#cfeat-spells').value)   || 0;
 
-      const hadSpeedBefore = isEdit ? (Number(f.speedBonus) || 0) : 0;
-
       const featData = {
         name,
         slug:             '',
@@ -7992,19 +8000,13 @@ function openCustomFeatModal(existingFeat, existingIndex) {
         poolBoosts,
       };
 
-      // Initialise baseSpeed BEFORE mutating feats so sumFeatSpeedBonuses()
-      // still reflects the old state when ensureBaseSpeed() back-computes the base.
-      if (speedBonus || hadSpeedBefore) ensureBaseSpeed();
-
       character.feats = character.feats || [];
       if (isEdit) {
         character.feats[existingIndex] = featData;
       } else {
         character.feats.push(featData);
       }
-
-      // Recompute speed now that baseSpeed is set and feats array is updated
-      if (speedBonus || hadSpeedBefore) recomputeSpeed();
+      recomputeSpeed();
 
       renderAll();
       persist();
