@@ -3013,9 +3013,12 @@ input.hb-deviation {
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
+  width: 100%;
 }
 .cfeat-pool-sel {
-  flex: 1;
+  flex: 1 1 0;
+  min-width: 0;       /* prevent select from ignoring flex shrink */
+  width: 0;           /* flex basis 0 lets it grow to fill available space */
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -3024,7 +3027,8 @@ input.hb-deviation {
   font-size: 0.85rem;
 }
 .cfeat-pool-amt {
-  width: 54px;
+  flex: 0 0 58px;     /* fixed width, won't shrink */
+  width: 58px;
   text-align: center;
   background: var(--bg-2);
   border: 1px solid var(--border);

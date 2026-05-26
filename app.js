@@ -1007,13 +1007,18 @@ function renderSpellcasting() {
   const sLabel = $('#spells-known-label');
   const toggle = $('#spells-mode-toggle');
 
+  const featCantripBonus = (character.feats || []).reduce((s, f) => s + (Number(f.cantripsBonus) || 0), 0);
+  const featSpellBonus   = (character.feats || []).reduce((s, f) => s + (Number(f.spellsBonus)   || 0), 0);
+
   if (cInput) {
     if (cAuto > 0) {
       character.cantripsKnown = cAuto;
-      cInput.value = cAuto;
+      cInput.value = cAuto + featCantripBonus;
       cInput.disabled = true;
       cInput.classList.add('locked');
-      cInput.title = 'Set automatically from class & level';
+      cInput.title = featCantripBonus > 0
+        ? `${cAuto} from class + ${featCantripBonus} from feat${featCantripBonus > 1 ? 's' : ''}`
+        : 'Set automatically from class & level';
     } else {
       cInput.disabled = false;
       cInput.classList.remove('locked');
@@ -1023,15 +1028,18 @@ function renderSpellcasting() {
   if (sInput) {
     if (sAuto > 0) {
       character.spellsKnown = sAuto;
-      sInput.value = sAuto;
+      sInput.value = sAuto + featSpellBonus;
       sInput.disabled = true;
       sInput.classList.add('locked');
       const info = preparedCasterInfo(slug);
-      sInput.title = prepared
+      const baseTitle = prepared
         ? (info
-            ? `Prepared = ${info.ability.toUpperCase()} mod ${info.halfLevel ? '+ ½ class level' : '+ class level'} (min 1)`
+            ? `Prepared = ${info.ability.toUpperCase()} mod ${info.halfLevel ? '+ half class level' : '+ class level'} (min 1)`
             : 'Prepared = spell ability mod + class level (min 1)')
         : 'Set automatically from class & level';
+      sInput.title = featSpellBonus > 0
+        ? `${baseTitle} + ${featSpellBonus} from feat${featSpellBonus > 1 ? 's' : ''}`
+        : baseTitle;
     } else {
       sInput.disabled = false;
       sInput.classList.remove('locked');
@@ -2909,6 +2917,8 @@ function attachBindings() {
         character.hpCurrent = Math.max(0, Math.min(character.hpMax, Number(val) || 0));
         renderCombat();
       } else if (key === 'speed') {
+        // Back-compute baseSpeed so feat bonuses stay additive on top of user's intended base
+        character.baseSpeed = Math.max(0, (Number(val) || 0) - sumFeatSpeedBonuses());
         applySpeedDeviation();
       } else if (key === 'ac') {
         // User typed/stepped a new final AC value. Back-compute the override
@@ -7582,11 +7592,16 @@ function sumFeatSpeedBonuses() {
 
 /**
  * Re-derive character.speed from baseSpeed + feat bonuses.
- * Only acts when a race has been set (baseSpeed > 0) so manual speed
- * entries on race-less characters are never silently overwritten.
+ * Lazy-initialises baseSpeed from the current speed value (net of existing
+ * feat bonuses) so characters without a race still get speed bonuses applied.
  */
 function recomputeSpeed() {
-  if (!character.baseSpeed) return;
+  if (!character.baseSpeed && character.speed) {
+    // Back-compute the non-feat base from whatever is currently showing.
+    // Handles: default speed 30 with no race, or old saves with baked-in values.
+    character.baseSpeed = Math.max(0, Number(character.speed) - sumFeatSpeedBonuses());
+  }
+  if (!character.baseSpeed) return; // speed = 0 and no feats: nothing to do
   character.speed = Number(character.baseSpeed) + sumFeatSpeedBonuses();
 }
 
