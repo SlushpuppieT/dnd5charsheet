@@ -1340,8 +1340,8 @@ input.locked {
 /* Rendered markdown inside popup desc blocks */
 .spell-detail-desc p  { margin: 0 0 6px; }
 .spell-detail-desc p:last-child { margin-bottom: 0; }
-.spell-detail-desc h1   { font-size: 1rem;    font-weight: 700; color: var(--accent-strong); margin: 10px 0 3px; }
-.spell-detail-desc h2   { font-size: 0.95rem; font-weight: 700; color: var(--accent-strong); margin: 10px 0 3px; }
+.spell-detail-desc h1   { font-size: 1.1rem;  font-weight: 700; color: var(--accent-strong); margin: 10px 0 3px; }
+.spell-detail-desc h2   { font-size: 0.95rem; font-weight: 700; color: var(--accent);        margin: 10px 0 3px; }
 .spell-detail-desc h3   { font-size: 0.9rem;  font-weight: 700; color: var(--accent);        margin: 8px 0 3px; }
 .spell-detail-desc h4   { font-size: 0.85rem; font-weight: 600; color: var(--accent);        margin: 6px 0 2px; }
 .spell-detail-desc h5   { font-size: 0.8rem;  font-weight: 600; color: var(--text-dim);      margin: 4px 0 2px; }
@@ -1736,6 +1736,7 @@ input.locked {
 .srd-detail h3 { color: var(--accent-strong); margin-bottom: 8px; }
 .srd-detail .stat-line { color: var(--text-dim); font-size: 0.8rem; margin: 2px 0; }
 .srd-detail .desc { margin-top: 8px; white-space: pre-wrap; }
+.srd-detail .spell-detail-desc { margin-top: 8px; }
 .srd-detail .higher { margin-top: 8px; font-style: italic; color: var(--text-dim); }
 
 /* ===== SRD-backed presets ===== */
@@ -1855,6 +1856,7 @@ input.locked {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 10px 14px;
   border-top: 1px solid var(--border);
@@ -2489,7 +2491,6 @@ input.hb-deviation {
   font-size: 0.8rem;
   color: var(--text-dim);
   padding: 0 10px 8px;
-  white-space: pre-wrap;
   border-top: 1px solid var(--border);
   display: none;
 }
@@ -2917,4 +2918,148 @@ input.hb-deviation {
   #attacks-card                                     { order: 3; }
   #death-saves-card                                 { order: 4; }
   .armor-section                                    { order: 5; }
+}
+
+/* ===================================================================
+   Custom Feat Modal
+   =================================================================== */
+.cfeat-modal { display: flex; flex-direction: column; gap: 0; }
+
+.cfeat-field-label {
+  display: block;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent-strong);
+  margin-bottom: 5px;
+  font-weight: 600;
+}
+.cfeat-req { color: var(--danger, #e55); }
+.cfeat-hint { font-size: 0.8rem; text-transform: none; letter-spacing: 0; color: var(--text-dim); font-weight: 400; }
+
+.cfeat-text-input,
+.cfeat-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+.cfeat-textarea { resize: vertical; min-height: 64px; }
+
+/* Ability Score row */
+.cfeat-asi-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.cfeat-asi-lbl {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+}
+.cfeat-asi-lbl input {
+  width: 46px;
+  text-align: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 4px 2px;
+  font-size: 0.88rem;
+}
+
+/* 3-column bonus grid */
+.cfeat-bonus-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 12px;
+}
+.cfeat-bonus-lbl {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.cfeat-num-input {
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 5px 4px;
+  font-size: 0.88rem;
+}
+
+/* Pool boost rows */
+.cfeat-pool-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.cfeat-pool-sel {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 4px 6px;
+  font-size: 0.85rem;
+}
+.cfeat-pool-amt {
+  width: 54px;
+  text-align: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 4px 4px;
+  font-size: 0.85rem;
+}
+
+/* Edit (pencil) button on custom feat rows */
+.cfeat-edit-btn {
+  opacity: 0.6;
+  font-size: 0.9rem;
+}
+.cfeat-edit-btn:hover { opacity: 1; }
+
+/* Bonus tags row shown below custom feat name */
+.cfeat-bonus-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 0 4px 2px;
+}
+.cfeat-bonus-tag {
+  display: inline-block;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 480px) {
+  .cfeat-bonus-grid { grid-template-columns: repeat(2, 1fr); }
 }

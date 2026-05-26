@@ -103,7 +103,7 @@ function blankCharacter() {
     subclassSkillPicked: false, // whether the pick modal has been shown for current subclass
     subclassFixedSkills: [], // auto-granted subclass skill keys (e.g. ['stealth'])
 
-    feats: [],              // [{ name, slug, source, custom, desc, prerequisite, asiChoice:{}, fixedAsi:{}, asiChoiceOptions:[], asiChoices:[], speedBonus:0, initiativeBonus:0 }]
+    feats: [],              // [{ name, slug, source, custom, desc, prerequisite, asiChoice:{}, fixedAsi:{}, asiChoiceOptions:[], asiChoices:[], speedBonus:0, initiativeBonus:0, acBonus:0, hpBonus:0, cantripsBonus:0, spellsBonus:0, poolBoosts:[{poolKey,poolName,amount}] }]
     raceFeatSlot: false,    // Variant Human (or similar) grants one free feat
     raceSkillCount: 0,      // race-granted skill picks (modal-chosen)
     raceSkillOptions: 'any',
@@ -169,7 +169,9 @@ function computeAutoMaxHP() {
   const avg = HD_AVG[die];
   const lvl = Math.max(1, Math.min(20, Number(character.level) || 1));
   const con = abilityMod(totalAbility('con'));
-  return Math.max(1, max + (lvl - 1) * avg + lvl * con);
+  // Feat HP bonuses are always additive (user confirmed)
+  const featHP = (character.feats || []).reduce((sum, f) => sum + (Number(f.hpBonus) || 0), 0);
+  return Math.max(1, max + (lvl - 1) * avg + lvl * con) + featHP;
 }
 
 function recalcHPIfAuto() {
@@ -268,7 +270,7 @@ function renderAbilities() {
   grid.querySelectorAll('input[data-ability]').forEach(inp => {
     inp.addEventListener('input', e => {
       const k = e.target.dataset.ability;
-      character.abilities[k] = Number(e.target.value) || 0;
+      character.abilities[k] = Math.max(1, Math.min(30, Number(e.target.value) || 1));
       if (k === 'con') recalcHPIfAuto();
       renderAll();
     });
@@ -862,6 +864,8 @@ function computeArmorAC() {
   for (const slot of [character.magicArmor1, character.magicArmor2]) {
     if (slot && slot.acBonus) total += Number(slot.acBonus) || 0;
   }
+  // Feat AC bonuses (live-computed, never stored as one-shot mutations)
+  total += (character.feats || []).reduce((sum, f) => sum + (Number(f.acBonus) || 0), 0);
   return total;
 }
 
@@ -1141,10 +1145,12 @@ function autoSpellSlots(classSlug, charLevel, spellLevel) {
 }
 
 function cantripsTotalAllowed() {
-  return Math.max(0, Number(character.cantripsKnown) || 0) + Math.max(0, Number(character.cantripsBonus) || 0);
+  const featBonus = (character.feats || []).reduce((sum, f) => sum + (Number(f.cantripsBonus) || 0), 0);
+  return Math.max(0, Number(character.cantripsKnown) || 0) + Math.max(0, Number(character.cantripsBonus) || 0) + featBonus;
 }
 function spellsTotalAllowed() {
-  return Math.max(0, Number(character.spellsKnown) || 0) + Math.max(0, Number(character.spellsBonus) || 0);
+  const featBonus = (character.feats || []).reduce((sum, f) => sum + (Number(f.spellsBonus) || 0), 0);
+  return Math.max(0, Number(character.spellsKnown) || 0) + Math.max(0, Number(character.spellsBonus) || 0) + featBonus;
 }
 
 function syncCantripCount() {
@@ -1245,6 +1251,28 @@ function highestAvailableSpellLevel() {
   return 0;
 }
 
+/**
+ * One-time migration: old format stored { total, used } per slot level.
+ * New format stores { used, bonus } where bonus = total - autoSlots.
+ * Called eagerly from loadPresets (after class cache is ready) so the
+ * auto-slot lookup has real data. getSlotData also runs it lazily as a
+ * fallback in case loadPresets hasn't completed yet.
+ */
+function migrateSpellSlotBonuses() {
+  Object.keys(character.spellSlots || {}).forEach(lvl => {
+    const s = character.spellSlots[lvl];
+    if (!s || typeof s.bonus === 'number') return;   // already migrated
+    if (typeof s.total === 'number') {
+      const auto = autoSpellSlots(character.classSlug, Number(character.level) || 1, Number(lvl));
+      s.bonus = Math.max(0, s.total - auto);
+      delete s.total;
+    } else {
+      s.bonus = 0;
+    }
+    if (typeof s.used !== 'number') s.used = 0;
+  });
+}
+
 function getSlotData(lvl) {
   const slots = character.spellSlots;
   let s = slots[lvl];
@@ -1254,10 +1282,10 @@ function getSlotData(lvl) {
   }
   if (typeof s.used !== 'number') s.used = 0;
   if (typeof s.bonus !== 'number') {
-    // Migrate from old { total, used } format
+    // Lazy fallback — runs if loadPresets hasn't completed yet
     if (typeof s.total === 'number') {
       const auto = autoSpellSlots(character.classSlug, Number(character.level) || 1, lvl);
-      s.bonus = s.total - auto;
+      s.bonus = Math.max(0, s.total - auto);
       delete s.total;
     } else {
       s.bonus = 0;
@@ -2682,7 +2710,8 @@ function renderSpells() {
   const order = character.spells
     .map((s, i) => ({ s, i }))
     .sort((a, b) => {
-      if (a.s.level !== b.s.level) return a.s.level - b.s.level;
+      const al = Number(a.s.level) || 0, bl = Number(b.s.level) || 0;
+      if (al !== bl) return al - bl;
       const aEmpty = !(a.s.name && a.s.name.trim());
       const bEmpty = !(b.s.name && b.s.name.trim());
       if (aEmpty && !bEmpty) return 1;
@@ -2877,6 +2906,7 @@ function attachBindings() {
         applyHPMaxDeviation();
         renderCombat();
       } else if (key === 'hpCurrent') {
+        character.hpCurrent = Math.max(0, Math.min(character.hpMax, Number(val) || 0));
         renderCombat();
       } else if (key === 'speed') {
         applySpeedDeviation();
@@ -3081,15 +3111,18 @@ function classExpectedHitDie() {
   return m ? m[0] : null;
 }
 
-// Flag the Speed input when the current speed doesn't match the race's default.
+// Flag the Speed input when the current speed doesn't match race default + feat bonuses.
 function applySpeedDeviation() {
   const inp = $('input[data-bind="speed"]');
   if (!inp) return;
-  const base = Number(character.baseSpeed) || 0;
-  const cur  = Number(character.speed)     || 0;
-  if (base && cur !== base) {
+  const base     = Number(character.baseSpeed) || 0;
+  const cur      = Number(character.speed)     || 0;
+  const expected = base + sumFeatSpeedBonuses();
+  if (base && cur !== expected) {
+    const featPart = sumFeatSpeedBonuses();
+    const featNote = featPart ? ` + ${featPart} ft from feats` : '';
     inp.classList.add('hb-deviation');
-    inp.title = `Non-standard speed (race default: ${base} ft)`;
+    inp.title = `Non-standard speed (expected: ${base} ft base${featNote} = ${expected} ft)`;
   } else {
     inp.classList.remove('hb-deviation');
     inp.title = '';
@@ -3791,9 +3824,11 @@ function inferLegacyHPMaxOverride() {
 
 // Autosave on any change
 function watchAutosave() {
-  document.addEventListener('input', persist);
-  document.addEventListener('change', persist);
-  document.addEventListener('click', () => setTimeout(persist, 0));
+  let timer = null;
+  const debouncedPersist = () => { clearTimeout(timer); timer = setTimeout(persist, 250); };
+  document.addEventListener('input',  debouncedPersist);
+  document.addEventListener('change', debouncedPersist);
+  document.addEventListener('click',  debouncedPersist);
 }
 
 function exportJSON() {
@@ -4078,7 +4113,7 @@ function showSrdDetail(item) {
       html += `<div class="stat-line">${escapeHTML(item.level || '')} ${escapeHTML(item.school || '')} • ${escapeHTML(item.casting_time || '')}</div>`;
       html += `<div class="stat-line">Range: ${escapeHTML(item.range || '')} • Duration: ${escapeHTML(item.duration || '')}</div>`;
       html += `<div class="stat-line">Components: ${escapeHTML(item.components || '')} ${item.material ? '('+escapeHTML(item.material)+')' : ''}</div>`;
-      html += `<div class="desc">${escapeHTML(item.desc || '')}</div>`;
+      html += `<div class="spell-detail-desc">${renderMarkdown(item.desc || '')}</div>`;
       if (item.higher_level) html += `<div class="higher"><b>At higher levels:</b> ${escapeHTML(item.higher_level)}</div>`;
       addBtn = `<button class="btn btn-accent btn-sm" id="srd-add">+ Add to Spells</button>`;
       break;
@@ -4099,7 +4134,7 @@ function showSrdDetail(item) {
     case 'magicitems':
       html += `<div class="stat-line">${escapeHTML(item.type || '')} • ${escapeHTML(item.rarity || '')}</div>`;
       if (item.requires_attunement) html += `<div class="stat-line">Requires attunement: ${escapeHTML(item.requires_attunement)}</div>`;
-      html += `<div class="desc">${escapeHTML(item.desc || '')}</div>`;
+      html += `<div class="spell-detail-desc">${renderMarkdown(item.desc || '')}</div>`;
       addBtn = `<button class="btn btn-accent btn-sm" id="srd-add">+ Add to Equipment</button>`;
       break;
     case 'weapons':
@@ -4123,28 +4158,28 @@ function showSrdDetail(item) {
       if (item.prof_tools) html += `<div class="stat-line">Tools: ${escapeHTML(item.prof_tools)}</div>`;
       if (item.prof_saving_throws) html += `<div class="stat-line">Saves: ${escapeHTML(item.prof_saving_throws)}</div>`;
       if (item.prof_skills) html += `<div class="stat-line">Skills: ${escapeHTML(item.prof_skills)}</div>`;
-      html += `<div class="desc">${escapeHTML(item.desc || '')}</div>`;
+      html += `<div class="spell-detail-desc">${renderMarkdown(item.desc || '')}</div>`;
       addBtn = `<button class="btn btn-sm" id="srd-add">Set Class</button>`;
       break;
     }
     case 'races':
       html += `<div class="stat-line">${escapeHTML(item.size || '')} • Speed ${escapeHTML(String(item.speed?.walk || item.speed || ''))}</div>`;
-      if (item.asi_desc) html += `<div class="stat-line">ASI: ${escapeHTML(item.asi_desc)}</div>`;
-      if (item.languages) html += `<div class="stat-line">Languages: ${escapeHTML(item.languages)}</div>`;
-      html += `<div class="desc">${escapeHTML(item.desc || '')}</div>`;
+      if (item.asi_desc) html += `<div class="stat-line">ASI: ${escapeHTML(stripApiPrefix(item.asi_desc))}</div>`;
+      if (item.languages) html += `<div class="stat-line">Languages: ${escapeHTML(stripApiPrefix(item.languages))}</div>`;
+      html += `<div class="spell-detail-desc">${renderMarkdown(item.desc || '')}</div>`;
       addBtn = `<button class="btn btn-sm" id="srd-add">Set Race</button>`;
       break;
     case 'backgrounds':
       if (item.skill_proficiencies) html += `<div class="stat-line">Skills: ${escapeHTML(item.skill_proficiencies)}</div>`;
       if (item.tool_proficiencies)  html += `<div class="stat-line">Tools: ${escapeHTML(item.tool_proficiencies)}</div>`;
-      if (item.languages)           html += `<div class="stat-line">Languages: ${escapeHTML(item.languages)}</div>`;
+      if (item.languages)           html += `<div class="stat-line">Languages: ${escapeHTML(stripApiPrefix(item.languages))}</div>`;
       if (item.feature)             html += `<div class="stat-line"><b>Feature:</b> ${escapeHTML(item.feature)}</div>`;
-      if (item.feature_desc)        html += `<div class="desc">${escapeHTML(item.feature_desc)}</div>`;
+      if (item.feature_desc)        html += `<div class="spell-detail-desc">${renderMarkdown(item.feature_desc)}</div>`;
       if (item.equipment)           html += `<div class="stat-line">Equipment: ${escapeHTML(item.equipment)}</div>`;
       addBtn = `<button class="btn btn-sm" id="srd-add">Apply Background</button>`;
       break;
     case 'conditions':
-      html += `<div class="desc">${escapeHTML(item.desc || '')}</div>`;
+      html += `<div class="spell-detail-desc">${renderMarkdown(item.desc || '')}</div>`;
       break;
   }
 
@@ -4321,7 +4356,11 @@ function saveSubclassSupplement(data) {
     // Strip the in-memory _isDefault flag so persisted JSON stays clean.
     // Editing a default starter → on save, it becomes "yours" (no _isDefault).
     const { _isDefault, ...persisted } = data;
-    localStorage.setItem(SUPPLEMENT_KEY, JSON.stringify(persisted));
+    try {
+      localStorage.setItem(SUPPLEMENT_KEY, JSON.stringify(persisted));
+    } catch (e) {
+      toast('Storage full — subclass supplement not saved');
+    }
     _subclassSupplement = persisted;
   }
 }
@@ -4449,7 +4488,11 @@ function saveRaceSupplement(data) {
     _raceSupplement = null;
   } else {
     const { _isDefault, ...persisted } = data;
-    localStorage.setItem(RACE_SUPPLEMENT_KEY, JSON.stringify(persisted));
+    try {
+      localStorage.setItem(RACE_SUPPLEMENT_KEY, JSON.stringify(persisted));
+    } catch (e) {
+      toast('Storage full — race supplement not saved');
+    }
     _raceSupplement = persisted;
   }
 }
@@ -5357,6 +5400,9 @@ function setApiLoading(on) {
       btn.classList.toggle('api-locked', !!on);
     }
   });
+  // Retry button — disable while a load is in flight to prevent overlapping requests
+  const retryBtn = $('#api-retry-btn');
+  if (retryBtn) retryBtn.disabled = !!on;
 }
 
 function setApiFailedBanner(failedPresets) {
@@ -5668,24 +5714,40 @@ function migrateBackgroundSlug(ch) {
   }
 }
 
+/**
+ * fetch() wrapper that resolves to parsed JSON on success, null on any error.
+ * Keeps an AbortController attached so callers can cancel via the returned
+ * controller (e.g. a user-facing Cancel button) — no automatic timeout.
+ * Actual network failures / server errors propagate through .catch as null.
+ */
+function fetchWithTimeout(url, options = {}) {
+  const ctrl = new AbortController();
+  const p = fetch(url, { ...options, signal: ctrl.signal })
+    .then(r => r.json())
+    .catch(() => null);
+  p._abort = () => ctrl.abort();
+  return p;
+}
+
 async function loadPresets() {
   setApiLoading(true);
   // Hide any previous failure banner while we retry
   setApiFailedBanner([]);
+  try {
   const headers = { 'Accept': 'application/json' };
 
   // Kick off all fetches in parallel — but await v1 classes FIRST so the
   // "Class Features" section can render as soon as that one arrives, rather
   // than waiting for the (much larger) spells payload.
   // v2 classes run alongside everything else (Phase 2).
-  const clsP    = fetch(`${SRD_BASE}/classes/?limit=50`,        { headers }).then(r => r.json()).catch(() => null);
-  const cls2P   = fetch(`${SRD_BASE_V2}/classes/?limit=200`,    { headers }).then(r => r.json()).catch(() => null);
-  const racP    = fetch(`${SRD_BASE}/races/?limit=100`,         { headers }).then(r => r.json()).catch(() => null);
-  const bgP     = fetch(`${SRD_BASE_V2}/backgrounds/?limit=100`, { headers }).then(r => r.json()).catch(() => null);
-  const featsP  = fetch(`${SRD_BASE}/feats/?limit=200`,         { headers }).then(r => r.json()).catch(() => null);
-  const spellsP = fetch(`${SRD_BASE_V2}/spells/?limit=2000&fields=key,name,document,level,school,casting_time,ritual`, { headers }).then(r => r.json()).catch(() => null);
-  const armorP  = fetch(`${SRD_BASE}/armor/?limit=100`,         { headers }).then(r => r.json()).catch(() => null);
-  const miP     = fetch(`${SRD_BASE}/magicitems/?limit=2000`,   { headers }).then(r => r.json()).catch(() => null);
+  const clsP    = fetchWithTimeout(`${SRD_BASE}/classes/?limit=50`,        { headers });
+  const cls2P   = fetchWithTimeout(`${SRD_BASE_V2}/classes/?limit=200`,    { headers });
+  const racP    = fetchWithTimeout(`${SRD_BASE}/races/?limit=100`,         { headers });
+  const bgP     = fetchWithTimeout(`${SRD_BASE_V2}/backgrounds/?limit=100`, { headers });
+  const featsP  = fetchWithTimeout(`${SRD_BASE}/feats/?limit=200`,         { headers });
+  const spellsP = fetchWithTimeout(`${SRD_BASE_V2}/spells/?limit=2000&fields=key,name,document,level,school,casting_time,ritual`, { headers });
+  const armorP  = fetchWithTimeout(`${SRD_BASE}/armor/?limit=100`,         { headers });
+  const miP     = fetchWithTimeout(`${SRD_BASE}/magicitems/?limit=2000`,   { headers });
 
   // Phase 1: v1 classes — render Class Features immediately when ready.
   const cls = await clsP;
@@ -5722,6 +5784,18 @@ async function loadPresets() {
   if (armor  && armor.results  && armor.results.length)  presetCache.armor      = armor.results;
   if (mi     && mi.results     && mi.results.length)     presetCache.magicitems = mi.results.filter(isMagicACItem);
 
+  // Surface failures for secondary data (feats, spells, armor, magic items).
+  // These don't warrant the full API failure banner but should still inform the user.
+  const secondaryFailed = [
+    ...(!feats  || !feats.results  ? ['Feats']       : []),
+    ...(!spells || !spells.results ? ['Spells']      : []),
+    ...(!armor  || !armor.results  ? ['Armor']       : []),
+    ...(!mi     || !mi.results     ? ['Magic items'] : []),
+  ];
+  if (secondaryFailed.length) {
+    toast(`${secondaryFailed.join(', ')} data unavailable — check connection`);
+  }
+
   // Determine which of the three critical presets failed to load.
   const failedPresets = [
     ...(!cls || !cls.results ? ['class']      : []),
@@ -5752,6 +5826,7 @@ async function loadPresets() {
   mergeSupplementIntoCache();   // inject user-curated subclasses (idempotent)
   mergeRaceSupplementIntoCache(); // inject user-curated races/subraces
   applySubclassPools();         // rebuild subclass pools now that the supplement is available
+  migrateSpellSlotBonuses();    // migrate legacy { total } → { bonus } now that class cache is ready
   populatePresetSelects();
   populatePresetDropdowns();  // fill custom dropdown lists now that cache is ready
   populateArmorDropdowns();   // now that armor + magicitems caches are populated
@@ -5826,7 +5901,9 @@ async function loadPresets() {
     // spell-slot tables, cantrips/spells-known inputs) is reflected.
     renderAll();
   }
-  setApiLoading(false);
+  } finally {
+    setApiLoading(false);
+  }
 }
 
 // Friendly source tags for non-SRD content.
@@ -5944,7 +6021,11 @@ function setEnabledSources(enabledSet) {
     localStorage.removeItem(SOURCE_FILTER_KEY);
     return;
   }
-  localStorage.setItem(SOURCE_FILTER_KEY, JSON.stringify([...enabledSet]));
+  try {
+    localStorage.setItem(SOURCE_FILTER_KEY, JSON.stringify([...enabledSet]));
+  } catch (e) {
+    toast('Storage full — source filter not saved');
+  }
 }
 
 /**
@@ -6859,9 +6940,8 @@ function openSkillChoiceModal({ title, summary, count, options, onApply }) {
       const chosen = $$('#modal-body .choice-row input:checked').map(cb =>
         cb.closest('.choice-row').dataset.name
       );
-      if (chosen.length !== count) {
-        toast(`Pick exactly ${count}`);
-        return false;
+      if (chosen.length < count) {
+        toast(`${chosen.length} of ${count} skills applied — add the rest manually`);
       }
       onApply(chosen);
       return true;
@@ -6897,6 +6977,14 @@ function openSkillChoiceModal({ title, summary, count, options, onApply }) {
 // ====================================================================
 // Rest modal
 // ====================================================================
+
+/** Format a hit-dice roll as "XdY+Z", "XdY-Z", or "XdY" (no suffix when CON is 0). */
+function restHdFormula(count, die, conMod) {
+  const total = conMod * count;
+  const suffix = total > 0 ? '+' + total : total < 0 ? String(total) : '';
+  return `${count}${die}${suffix}`;
+}
+
 function buildRestModalBody(type) {
   const hdRemain = Math.max(0, parseInt(character.hitDiceCurrent) || 0);
   const hdMax    = Math.max(1, parseInt(character.hitDiceTotal)   || 0);
@@ -6928,7 +7016,7 @@ function buildRestModalBody(type) {
       <div class="rest-hd-row">
         <label for="rest-hd-count">Spend</label>
         <input type="number" id="rest-hd-count" value="1" min="1" max="${hdRemain}">
-        <span>Hit ${hdRemain === 1 ? 'Die' : 'Dice'} (${die} + ${fmtMod(conMod)} each)</span>
+        <span>Hit ${hdRemain === 1 ? 'Die' : 'Dice'}: <strong id="rest-hd-formula">${restHdFormula(1, die, conMod)}</strong></span>
       </div>
       <button class="btn" id="rest-roll-btn">Roll!</button>`}
       <div id="rest-results"></div>
@@ -6953,6 +7041,10 @@ function wireRestModalEvents() {
   $$('#modal-body .rest-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       const type = tab.dataset.restType;
+      // If dice have already been rolled, warn before discarding the result
+      if (_pendingRestData && _pendingRestData.hdSpent) {
+        if (!confirm('Your rolled dice will be cleared. Switch rest type?')) return;
+      }
       $('#modal-body').innerHTML = buildRestModalBody(type);
       const confirmBtn = $('#modal-confirm');
       if (confirmBtn) confirmBtn.textContent = type === 'long' ? 'Take Long Rest' : 'Confirm Short Rest';
@@ -6960,6 +7052,18 @@ function wireRestModalEvents() {
       wireRestModalEvents();
     });
   });
+
+  // Update the XdY+Z formula live as the count input changes
+  const hdCountEl  = $('#rest-hd-count');
+  const formulaEl  = $('#rest-hd-formula');
+  if (hdCountEl && formulaEl) {
+    hdCountEl.addEventListener('input', () => {
+      const count  = Math.max(1, parseInt(hdCountEl.value) || 1);
+      const die    = character.hitDie || 'd8';
+      const conMod = abilityMod(totalAbility('con'));
+      formulaEl.textContent = restHdFormula(count, die, conMod);
+    });
+  }
 
   const rollBtn = $('#rest-roll-btn');
   if (rollBtn) {
@@ -7141,9 +7245,24 @@ function renderResourcePools() {
   const pools = character.resourcePools || [];
 
   // Recompute max for class-defined pools; clamp used.
-  // For class pools: max = baseMax + bonus. For custom pools: max stays as user-set.
+  // For class pools: max = baseMax + bonus + featBoost.
+  // For custom pools: stored p.max is never mutated; displayMax = p.max + featBoost.
   pools.forEach(p => {
-    if (p.custom) return;
+    // Sum feat pool boosts targeting this pool.
+    // Prefer stable key match (class pools); fall back to name match (custom pools or old data).
+    const featBoost = (character.feats || []).reduce((sum, f) =>
+      sum + (f.poolBoosts || []).filter(b =>
+        (b.poolKey && p.key && b.poolKey === p.key) || (!b.poolKey && b.poolName === p.name)
+      ).reduce((s, b) => s + (Number(b.amount) || 0), 0), 0);
+    p.featBoost = featBoost;
+
+    if (p.custom) {
+      // Custom pools: never mutate stored max; compute transient displayMax for rendering
+      p.displayMax = Math.max(1, (Number(p.max) || 1) + featBoost);
+      // Clamp used against displayMax (feat removed mid-session could leave used > displayMax)
+      if ((p.used || 0) > p.displayMax) p.used = p.displayMax;
+      return;
+    }
     if (!p.classKey || !p.key) return;
     const defId = p.key.slice(p.classKey.length + 1);
     const def = (CLASS_POOL_DEFS[p.classKey] || []).find(d => d.id === defId);
@@ -7152,13 +7271,14 @@ function renderResourcePools() {
     p.baseMax  = auto;
     p.bonus    = Number(p.bonus) || 0;
     p.unlimited = auto < 0;
-    if (p.unlimited) { p.max = -1; p.used = 0; return; }
-    p.max = Math.max(1, auto + p.bonus);
+    if (p.unlimited) { p.max = -1; p.used = 0; p.displayMax = -1; return; }
+    p.max = Math.max(1, auto + p.bonus + featBoost);
+    p.displayMax = p.max;
     if (p.used > p.max) p.used = p.max;
   });
 
   wrap.innerHTML = '';
-  const visible = pools.filter(p => p.unlimited || p.max > 0);
+  const visible = pools.filter(p => p.unlimited || (p.displayMax !== undefined ? p.displayMax : p.max) > 0);
   if (!visible.length) {
     wrap.innerHTML = '<p class="srd-hint" style="margin:4px 0">No resources tracked. Pick a class or add a custom pool.</p>';
     return;
@@ -7166,8 +7286,12 @@ function renderResourcePools() {
 
   visible.forEach(pool => {
     const idx = pools.indexOf(pool);
-    const isNumeric = !pool.unlimited && pool.max > 20;
-    const baseMax = pool.custom ? pool.max : Math.max(0, Number(pool.baseMax) || 0);
+    // Use displayMax for rendering; displayMax = stored max + feat boosts (custom pools keep stored max intact)
+    const dMax    = pool.displayMax !== undefined ? pool.displayMax : pool.max;
+    const isNumeric = !pool.unlimited && dMax > 20;
+    // Base (non-bonus) max: class-auto max only; manual bonus slots and feat-boost slots render as bonus bubbles.
+    // For custom pools, stored max is the "base" — only feat-boost slots beyond it are bonus.
+    const baseMax = pool.custom ? (Number(pool.max) || 0) : Math.max(0, Number(pool.baseMax) || 0);
     const el = document.createElement('div');
     el.className = 'rp-entry';
 
@@ -7175,16 +7299,17 @@ function renderResourcePools() {
     if (pool.unlimited) {
       bodyHtml = '<span class="rp-unlimited" title="Unlimited">∞</span>';
     } else if (isNumeric) {
-      const cur = pool.max - pool.used;
+      const cur = dMax - pool.used;
       bodyHtml = `<div class="rp-numeric">
-        <input type="number" class="rp-cur-input" data-rp="${idx}" value="${cur}" min="0" max="${pool.max}">
-        <span class="rp-num-sep">/ ${pool.max}</span>
+        <input type="number" class="rp-cur-input" data-rp="${idx}" value="${cur}" min="0" max="${dMax}">
+        <span class="rp-num-sep">/ ${dMax}</span>
       </div>`;
     } else {
       let bubbles = '';
-      for (let i = 0; i < pool.max; i++) {
-        const isUsed  = i >= (pool.max - pool.used);
-        const isBonus = !pool.custom && i >= baseMax;
+      for (let i = 0; i < dMax; i++) {
+        const isUsed  = i >= (dMax - pool.used);
+        // A bubble is "bonus" if it's beyond the non-feat max (feat-granted slots glow differently)
+        const isBonus = i >= baseMax;
         const cls = ['rp-bubble'];
         if (isUsed)  cls.push('used');
         if (isBonus) cls.push('bonus');
@@ -7218,8 +7343,10 @@ function renderResourcePools() {
     bub.addEventListener('click', () => {
       const pool = character.resourcePools[Number(bub.dataset.rp)];
       if (!pool) return;
+      // Use displayMax (includes feat boosts) so feat-boosted bubbles are clickable
+      const effectiveMax = pool.displayMax !== undefined ? pool.displayMax : pool.max;
       if (bub.classList.contains('used')) pool.used = Math.max(0, pool.used - 1);
-      else pool.used = Math.min(pool.max, pool.used + 1);
+      else pool.used = Math.min(effectiveMax, pool.used + 1);
       renderResourcePools(); persist();
     });
   });
@@ -7227,8 +7354,9 @@ function renderResourcePools() {
     inp.addEventListener('change', () => {
       const pool = character.resourcePools[Number(inp.dataset.rp)];
       if (!pool) return;
-      const cur = Math.max(0, Math.min(pool.max, Number(inp.value) || 0));
-      pool.used = pool.max - cur;
+      const effectiveMax = pool.displayMax !== undefined ? pool.displayMax : pool.max;
+      const cur = Math.max(0, Math.min(effectiveMax, Number(inp.value) || 0));
+      pool.used = effectiveMax - cur;
       renderResourcePools(); persist();
     });
   });
@@ -7452,6 +7580,16 @@ function sumFeatSpeedBonuses() {
   return (character.feats || []).reduce((sum, f) => sum + (Number(f.speedBonus) || 0), 0);
 }
 
+/**
+ * Re-derive character.speed from baseSpeed + feat bonuses.
+ * Only acts when a race has been set (baseSpeed > 0) so manual speed
+ * entries on race-less characters are never silently overwritten.
+ */
+function recomputeSpeed() {
+  if (!character.baseSpeed) return;
+  character.speed = Number(character.baseSpeed) + sumFeatSpeedBonuses();
+}
+
 function buildFeatDesc(feat) {
   // Combine the short blurb (`desc`) with each line of `effects_desc`
   // so the expanded feat entry shows the full rules text, not just the intro.
@@ -7485,11 +7623,17 @@ function addFeatToCharacter(feat) {
     asiChoice:       { ...fixed },        // combined total; updated as user picks
     speedBonus,
     initiativeBonus,
+    // Custom-feat bonus fields (zero/empty for SRD feats; populated via custom feat editor)
+    acBonus:         0,
+    hpBonus:         0,
+    cantripsBonus:   0,
+    spellsBonus:     0,
+    poolBoosts:      [],  // [{ poolKey: string, poolName: string, amount: number }] key='' for custom pools
   };
   character.feats.push(newFeat);
 
-  // Apply speed bonus immediately (before renderFeats calls renderCombat)
-  if (speedBonus) character.speed = (character.speed || 0) + speedBonus;
+  // Live-compute speed only when this feat changes the total (preserves manual overrides)
+  if (speedBonus) recomputeSpeed();
 
   renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
   renderFeats();
@@ -7572,15 +7716,32 @@ function renderFeats() {
 
     const el = document.createElement('div');
     el.className = 'feat-entry';
+    // Build custom bonus tags for display (non-zero values only)
+    const bonusTags = [];
+    if (Number(f.speedBonus))      bonusTags.push(`+${Number(f.speedBonus)} ft speed`);
+    if (Number(f.initiativeBonus)) bonusTags.push(`${Number(f.initiativeBonus) > 0 ? '+' : ''}${Number(f.initiativeBonus)} initiative`);
+    if (Number(f.acBonus))         bonusTags.push(`+${Number(f.acBonus)} AC`);
+    if (Number(f.hpBonus))         bonusTags.push(`+${Number(f.hpBonus)} HP`);
+    if (Number(f.cantripsBonus))   bonusTags.push(`+${Number(f.cantripsBonus)} cantrip${Number(f.cantripsBonus) > 1 ? 's' : ''}`);
+    if (Number(f.spellsBonus))     bonusTags.push(`+${Number(f.spellsBonus)} spell${Number(f.spellsBonus) > 1 ? 's' : ''}`);
+    (f.poolBoosts || []).forEach(b => {
+      if (Number(b.amount) > 0) bonusTags.push(`+${Number(b.amount)} ${escapeHTML(b.poolName)}`);
+    });
+    const bonusLine = bonusTags.length
+      ? `<div class="cfeat-bonus-tags">${bonusTags.map(t => `<span class="cfeat-bonus-tag">${t}</span>`).join('')}</div>`
+      : '';
+
     el.innerHTML = `
       <div class="feat-row">
         <span class="feat-name">${escapeHTML(f.name)}${srcTag}</span>
         ${fixedText ? `<span class="feat-asi">${fixedText}</span>` : ''}
         ${selects.join('')}
+        ${f.custom ? `<button class="icon-btn cfeat-edit-btn" data-feat-edit="${i}" title="Edit feat">&#9998;</button>` : ''}
         <button class="icon-btn" data-feat-del="${i}" title="Remove feat">&times;</button>
       </div>
+      ${bonusLine}
       ${f.prerequisite ? `<div class="feat-prereq">Req: ${escapeHTML(f.prerequisite)}</div>` : ''}
-      ${f.desc ? `<div class="feat-desc">${escapeHTML(f.desc)}</div>` : ''}
+      ${f.desc ? `<div class="feat-desc">${renderMarkdown(f.desc)}</div>` : ''}
     `;
     el.querySelector('.feat-name').addEventListener('click', () => el.classList.toggle('expanded'));
 
@@ -7604,6 +7765,16 @@ function renderFeats() {
     list.appendChild(el);
   });
 
+  // Wire edit buttons for custom feats
+  list.querySelectorAll('[data-feat-edit]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const idx  = Number(btn.dataset.featEdit);
+      const feat = character.feats[idx];
+      if (feat && feat.custom) openCustomFeatModal(feat, idx);
+    });
+  });
+
   list.querySelectorAll('[data-feat-del]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -7611,11 +7782,9 @@ function renderFeats() {
       const removed = character.feats[idx];
       const label = (removed && removed.name && removed.name.trim()) ? `<strong>${escapeHTML(removed.name.trim())}</strong>` : 'this unnamed feat';
       confirmDel(`Are you sure you want to remove the feat ${label}?`, () => {
-        // Subtract feat's speed bonus before removing
-        if (removed && removed.speedBonus) {
-          character.speed = Math.max(0, (character.speed || 0) - Number(removed.speedBonus));
-        }
         character.feats.splice(idx, 1);
+        // Live-compute speed only when the removed feat had a speed bonus
+        if (removed && removed.speedBonus) recomputeSpeed();
         renderAbilities(); renderSaves(); renderSkills(); renderPassive(); renderCombat(); renderSpellcasting();
         renderFeats(); persist();
         return true;
@@ -7655,16 +7824,200 @@ function populateFeatPicker() {
   });
 }
 
+// ====================================================================
+// Custom Feat Creation / Edit Modal
+// ====================================================================
+
+/**
+ * Open the custom feat editor.
+ * @param {Object|null} existingFeat  - feat object to edit, or null to create new
+ * @param {number}      existingIndex - index in character.feats[], or -1 for create
+ */
+function openCustomFeatModal(existingFeat, existingIndex) {
+  const isEdit = typeof existingIndex === 'number' && existingIndex >= 0 && existingFeat != null;
+  const f = existingFeat || {};
+
+  // Build resource pool option list (pools must exist before a feat can boost them)
+  const pools = character.resourcePools || [];
+  const poolOptsHTML = pools.map(p => {
+    const val = `${p.key || ''}|${p.name}`;
+    return `<option value="${escapeHTML(val)}">${escapeHTML(p.name)}</option>`;
+  }).join('');
+
+  // Returns HTML string for one pool-boost row
+  function poolBoostRowHTML(boost) {
+    const amt = boost ? (Number(boost.amount) || 1) : 1;
+    return `<div class="cfeat-pool-row">
+      <select class="cfeat-pool-sel">
+        <option value="">-- select pool --</option>
+        ${poolOptsHTML}
+      </select>
+      <input type="number" class="cfeat-pool-amt" value="${amt}" min="1" max="99">
+      <button type="button" class="icon-btn cfeat-pool-del" title="Remove">&times;</button>
+    </div>`;
+  }
+
+  const existingBoostsHTML = (f.poolBoosts || []).map(b => poolBoostRowHTML(b)).join('');
+
+  // Fallback: pre-refactor custom feats stored ASI in `asiChoice`, not `fixedAsi`
+  const asiRowsHTML = ABILITIES.map(a => {
+    const val = Number((f.fixedAsi || f.asiChoice || {})[a.key]) || 0;
+    return `<label class="cfeat-asi-lbl" title="${a.name}">
+      ${a.name.slice(0,3).toUpperCase()}
+      <input type="number" class="cfeat-asi" data-key="${a.key}" value="${val}" min="0" max="4">
+    </label>`;
+  }).join('');
+
+  const bodyHTML = `
+    <div class="cfeat-modal">
+      <div class="modal-section">
+        <label class="cfeat-field-label">Name <span class="cfeat-req">*</span></label>
+        <input id="cfeat-name" type="text" class="cfeat-text-input" placeholder="Feat name" value="${escapeHTML(f.name || '')}">
+      </div>
+      <div class="modal-section">
+        <label class="cfeat-field-label">Description</label>
+        <textarea id="cfeat-desc" class="cfeat-textarea" rows="3" placeholder="Rules text (Markdown supported)...">${escapeHTML(f.desc || '')}</textarea>
+      </div>
+      <div class="modal-section">
+        <label class="cfeat-field-label">Prerequisite</label>
+        <input id="cfeat-prereq" type="text" class="cfeat-text-input" placeholder="e.g. Dexterity 13 or higher" value="${escapeHTML(f.prerequisite || '')}">
+      </div>
+      <div class="modal-section">
+        <label class="cfeat-field-label">Ability Score Improvements</label>
+        <div class="cfeat-asi-row">${asiRowsHTML}</div>
+      </div>
+      <div class="modal-section">
+        <label class="cfeat-field-label">Numeric Bonuses</label>
+        <div class="cfeat-bonus-grid">
+          <label class="cfeat-bonus-lbl">Speed (ft)<input type="number" id="cfeat-speed" class="cfeat-num-input" value="${Number(f.speedBonus) || 0}" min="0" max="60" step="5"></label>
+          <label class="cfeat-bonus-lbl">Initiative<input type="number" id="cfeat-init" class="cfeat-num-input" value="${Number(f.initiativeBonus) || 0}" min="-5" max="10"></label>
+          <label class="cfeat-bonus-lbl">AC bonus<input type="number" id="cfeat-ac" class="cfeat-num-input" value="${Number(f.acBonus) || 0}" min="0" max="10"></label>
+          <label class="cfeat-bonus-lbl">HP bonus<input type="number" id="cfeat-hp" class="cfeat-num-input" value="${Number(f.hpBonus) || 0}" min="0" max="999"></label>
+          <label class="cfeat-bonus-lbl">Cantrips<input type="number" id="cfeat-cantrips" class="cfeat-num-input" value="${Number(f.cantripsBonus) || 0}" min="0" max="10"></label>
+          <label class="cfeat-bonus-lbl">Spells<input type="number" id="cfeat-spells" class="cfeat-num-input" value="${Number(f.spellsBonus) || 0}" min="0" max="20"></label>
+        </div>
+      </div>
+      <div class="modal-section">
+        <label class="cfeat-field-label">Resource Pool Boosts
+          ${pools.length === 0 ? '<span class="cfeat-hint"> — no pools exist yet</span>' : ''}
+        </label>
+        <div id="cfeat-pool-boosts">${existingBoostsHTML}</div>
+        ${pools.length > 0 ? '<button type="button" id="cfeat-add-boost" class="btn btn-sm" style="margin-top:6px">+ Add Pool Boost</button>' : ''}
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title:       isEdit ? `Edit Feat: ${escapeHTML(f.name || 'Custom')}` : 'Create Custom Feat',
+    bodyHTML,
+    confirmText: isEdit ? 'Save Changes' : 'Create Feat',
+    onConfirm: () => {
+      const name = ($('#cfeat-name').value || '').trim();
+      if (!name) { toast('Feat name is required'); return false; }
+
+      // Gather fixed ASI
+      const fixedAsi = {};
+      $('#modal-body').querySelectorAll('.cfeat-asi').forEach(inp => {
+        const v = Number(inp.value) || 0;
+        if (v > 0) fixedAsi[inp.dataset.key] = v;
+      });
+
+      // Gather pool boosts (skip rows with no pool selected)
+      const poolBoosts = [];
+      $('#modal-body').querySelectorAll('.cfeat-pool-row').forEach(row => {
+        const sel = row.querySelector('.cfeat-pool-sel');
+        const amt = Number(row.querySelector('.cfeat-pool-amt').value) || 0;
+        if (!sel.value || amt <= 0) return;
+        const pipeIdx = sel.value.indexOf('|');
+        const poolKey  = pipeIdx >= 0 ? sel.value.slice(0, pipeIdx) : '';
+        const poolName = pipeIdx >= 0 ? sel.value.slice(pipeIdx + 1) : sel.value;
+        poolBoosts.push({ poolKey, poolName, amount: amt });
+      });
+
+      const speedBonus      = Number($('#cfeat-speed').value)    || 0;
+      const initiativeBonus = Number($('#cfeat-init').value)     || 0;
+      const acBonus         = Number($('#cfeat-ac').value)       || 0;
+      const hpBonus         = Number($('#cfeat-hp').value)       || 0;
+      const cantripsBonus   = Number($('#cfeat-cantrips').value) || 0;
+      const spellsBonus     = Number($('#cfeat-spells').value)   || 0;
+
+      const hadSpeedBefore = isEdit ? (Number(f.speedBonus) || 0) : 0;
+
+      const featData = {
+        name,
+        slug:             '',
+        source:           '',
+        custom:           true,
+        desc:             ($('#cfeat-desc').value || '').trim(),
+        prerequisite:     ($('#cfeat-prereq').value || '').trim(),
+        fixedAsi,
+        asiChoiceOptions: [],
+        asiChoices:       [],
+        asiChoice:        { ...fixedAsi },
+        speedBonus,
+        initiativeBonus,
+        acBonus,
+        hpBonus,
+        cantripsBonus,
+        spellsBonus,
+        poolBoosts,
+      };
+
+      character.feats = character.feats || [];
+      if (isEdit) {
+        character.feats[existingIndex] = featData;
+      } else {
+        character.feats.push(featData);
+      }
+
+      // Recompute speed if this feat or the previous version had a speed bonus
+      if (speedBonus || hadSpeedBefore) recomputeSpeed();
+
+      renderAll();
+      persist();
+      toast(isEdit ? `Updated feat: ${name}` : `Created feat: ${name}`);
+      return true;
+    },
+  });
+
+  // Wire pool boost "add" button (after showModal puts HTML in DOM)
+  const addBoostBtn = $('#cfeat-add-boost');
+  if (addBoostBtn) {
+    addBoostBtn.addEventListener('click', () => {
+      const container = $('#cfeat-pool-boosts');
+      if (!container) return;
+      const wrapper = document.createElement('div');
+      wrapper.innerHTML = poolBoostRowHTML(null);
+      const row = wrapper.firstElementChild;
+      container.appendChild(row);
+      row.querySelector('.cfeat-pool-del').addEventListener('click', () => row.remove());
+    });
+  }
+
+  // Wire remove buttons for pre-existing rows
+  $('#modal-body').querySelectorAll('.cfeat-pool-del').forEach(btn => {
+    btn.addEventListener('click', () => btn.closest('.cfeat-pool-row').remove());
+  });
+
+  // Pre-select pool options for edit mode
+  if (isEdit && f.poolBoosts && f.poolBoosts.length) {
+    $('#modal-body').querySelectorAll('.cfeat-pool-row').forEach((row, ri) => {
+      const boost = f.poolBoosts[ri];
+      if (!boost) return;
+      const sel = row.querySelector('.cfeat-pool-sel');
+      // Try key match first, then name match
+      const target = pools.find(p =>
+        (boost.poolKey && p.key && boost.poolKey === p.key) || p.name === boost.poolName
+      );
+      if (target) sel.value = `${target.key || ''}|${target.name}`;
+    });
+  }
+}
+
 function wireFeatPicker() {
   const customBtn = $('#btn-add-custom-feat');
   if (customBtn) {
-    customBtn.addEventListener('click', () => {
-      const name = prompt('Custom feat name:');
-      if (!name || !name.trim()) return;
-      character.feats = character.feats || [];
-      character.feats.push({ name: name.trim(), slug: '', source: '', custom: true, desc: '', prerequisite: '', asiChoice: {} });
-      renderFeats(); persist();
-    });
+    customBtn.addEventListener('click', () => openCustomFeatModal(null, -1));
   }
 }
 
@@ -7815,10 +8168,15 @@ function renderFeatHoverContent(feat) {
   if (feat.prerequisite) {
     html += `<div class="phc-line"><b>Prereq:</b> ${escapeHTML(feat.prerequisite)}</div>`;
   }
-  const intro = String(feat.desc || '').trim();
-  if (intro) {
-    const snippet = intro.length > 150 ? intro.slice(0, 147) + '...' : intro;
-    html += `<div class="phc-line">${escapeHTML(snippet)}</div>`;
+  const rawDesc = String(feat.desc || '').trim();
+  if (rawDesc) {
+    // Find first non-empty, non-heading line and strip any bold-italic API prefix
+    const firstLine = rawDesc.split('\n').find(l => l.trim() && !l.trim().startsWith('#')) || '';
+    const cleaned = stripApiPrefix(firstLine).trim();
+    if (cleaned) {
+      const snippet = cleaned.length > 150 ? cleaned.slice(0, 147) + '...' : cleaned;
+      html += `<div class="phc-line">${escapeHTML(snippet)}</div>`;
+    }
   }
   return html;
 }
