@@ -177,13 +177,12 @@ function computeAutoMaxHP() {
 
 function recalcHPIfAuto() {
   if (!character.autoHP) return;
+  const oldMax = character.hpMax;
   const newMax = computeAutoMaxHP() + (Number(character.hpMaxOverride) || 0);
-  const wasFull = character.hpCurrent >= character.hpMax;
   character.hpMax = newMax;
-  // If they were at full HP, keep them at full when max changes.
-  // Otherwise just clamp current to the new max.
-  if (wasFull) character.hpCurrent = newMax;
-  else if (character.hpCurrent > newMax) character.hpCurrent = newMax;
+  // Track the delta: current HP moves up/down by the same amount as max HP.
+  const delta = newMax - oldMax;
+  character.hpCurrent = Math.max(0, Math.min(newMax, character.hpCurrent + delta));
 }
 
 // When a class is set, hit dice scale with level. User can still edit afterwards.
@@ -555,6 +554,10 @@ function renderSkills() {
     // Expertise hint — proficient skill without expertise, when class grants more
     if (expRemaining > 0 && st.prof && !st.exp) {
       tagHtml += `<span class="skill-src-tag skill-src-exp skill-src-hint clickable" data-skill-tag="${s.key}" data-tag-source="exp" data-tag-action="assign" title="Click to take as Expertise (×2)">×2</span>`;
+    }
+    // Expertise active — filled chip (mirrors CLASS/BG/RACE/SUB filled tags)
+    if (st.exp) {
+      tagHtml += `<span class="skill-src-tag skill-src-exp clickable" data-skill-tag="${s.key}" data-tag-source="exp" data-tag-action="remove" title="Expertise (×2) — click to remove">×2</span>`;
     }
     // Custom skills no longer carry a permanent visual chip — the faint row
     // background + ability dropdown + × button already make their origin obvious.
@@ -1290,21 +1293,48 @@ function migrateSpellSlotBonuses() {
 }
 
 /**
- * One-time migration: introduce speedOverride.
- * Heals corrupted baseSpeed values that past lazy-init code may have written.
+ * Migration: ensure baseSpeed and speedOverride are consistent.
+ * Called from loadPresets() after the race cache is available.
+ *
+ * Root problem: blankCharacter() defaults both to 0, so the old
+ * `=== undefined` guard was always true after Object.assign(blankCharacter(), obj)
+ * -- meaning the migration never actually ran for existing saves.
+ * New approach: if raceSlug is set but baseSpeed is 0, recover baseSpeed
+ * from the race cache (handles characters saved before baseSpeed tracking).
  */
 function migrateSpeedOverride() {
-  if (character.speedOverride !== undefined) return;  // already migrated
-  const speed    = Number(character.speed)     || 0;
-  const base     = Number(character.baseSpeed) || 0;
-  const featSum  = sumFeatSpeedBonuses();
-  // If baseSpeed looks corrupted (non-zero but no race applied), zero it out
-  // but preserve the user's displayed speed by capturing the residual in speedOverride.
-  if (base > 0 && !character.raceSlug) {
-    character.baseSpeed     = 0;
-    character.speedOverride = speed - featSum;
-  } else {
-    character.speedOverride = speed - base - featSum;
+  // Case 1: race is applied but baseSpeed was never persisted.
+  // Recover from the cache so applySpeedDeviation() has a baseline.
+  if (character.raceSlug && !Number(character.baseSpeed)) {
+    const [baseSlug, subSlug] = character.raceSlug.split(':');
+    const r = (presetCache.race || []).find(x => x.slug === baseSlug);
+    if (r) {
+      const sub      = subSlug ? (r.subraces || []).find(s => s.slug === subSlug) : null;
+      const speedWalk = (sub && sub.speed && sub.speed.walk)
+                      || (r.speed && r.speed.walk)
+                      || 0;
+      if (speedWalk) {
+        const featSum           = sumFeatSpeedBonuses();
+        character.baseSpeed     = speedWalk;
+        character.speedOverride = (Number(character.speed) || 0) - speedWalk - featSum;
+        return;
+      }
+    }
+  }
+
+  // Case 2: no race (or race cache miss). If speedOverride is somehow
+  // undefined (pre-blankCharacter-defaults era), initialise it now.
+  if (character.speedOverride === undefined) {
+    const speed   = Number(character.speed)     || 0;
+    const base    = Number(character.baseSpeed) || 0;
+    const featSum = sumFeatSpeedBonuses();
+    // Corrupted baseSpeed (non-zero but no race slug): zero it out.
+    if (base > 0 && !character.raceSlug) {
+      character.baseSpeed     = 0;
+      character.speedOverride = speed - featSum;
+    } else {
+      character.speedOverride = speed - base - featSum;
+    }
   }
 }
 
@@ -2904,6 +2934,7 @@ function attachBindings() {
       let val = el.value;
       if (el.type === 'checkbox') val = el.checked;
       else if (el.type === 'number') val = Number(val);
+      const prevHpMax = character.hpMax;   // capture before overwrite (used by hpMax handler)
       character[key] = val;
 
       if (key === 'level' || key === 'hitDie' || key === 'autoHP') {
@@ -2942,6 +2973,9 @@ function attachBindings() {
         } else {
           character.hpMaxOverride = 0;
         }
+        // Tie current HP to the max HP delta so the injury gap is preserved.
+        const hpDelta = character.hpMax - prevHpMax;
+        character.hpCurrent = Math.max(0, Math.min(character.hpMax, character.hpCurrent + hpDelta));
         applyHPMaxDeviation();
         renderCombat();
       } else if (key === 'hpCurrent') {
