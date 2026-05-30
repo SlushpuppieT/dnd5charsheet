@@ -2980,6 +2980,8 @@ function attachBindings() {
         renderCombat();
       } else if (key === 'hpCurrent') {
         character.hpCurrent = Math.max(0, Math.min(character.hpMax, Number(val) || 0));
+        // Reflect the clamp back into the input so it can't display past Max HP.
+        if (String(character.hpCurrent) !== el.value) el.value = character.hpCurrent;
         renderCombat();
       } else if (key === 'speed') {
         // Store how far the user has deviated from (baseSpeed + feat bonuses)
@@ -3143,7 +3145,9 @@ function wireGenericSteppers() {
       if (!inp) return;
       const cur  = Number(inp.value) || 0;
       const min  = inp.dataset.stepMin != null ? Number(inp.dataset.stepMin) : 0;
-      const max  = inp.dataset.stepMax != null ? Number(inp.dataset.stepMax) : Infinity;
+      // Current HP is capped at the live Max HP so it can never step past it.
+      let max  = inp.dataset.stepMax != null ? Number(inp.dataset.stepMax) : Infinity;
+      if (btn.dataset.stepTarget === 'hpCurrent') max = Number(character.hpMax) || 0;
       const next = Math.max(min, Math.min(max, cur + dir));
       if (next === cur) return;
       inp.value = next;
